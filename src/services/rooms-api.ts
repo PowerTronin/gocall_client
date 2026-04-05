@@ -113,9 +113,14 @@ export async function createRoom(name: string, token: string): Promise<Room> {
 
 /** Удаление комнаты (DELETE /rooms/:id) */
 export async function deleteRoom(roomID: string, token: string): Promise<void> {
-  void roomID;
-  void token;
-  throw new Error("Room delete endpoint is not implemented on this server");
+  const response = await fetch(`${API_BASE_URL}/rooms/${roomID}`, {
+    method: "DELETE",
+    headers: headers(token),
+  });
+  if (!response.ok) {
+    const errorData = await response.json().catch(() => ({}));
+    throw new Error(errorData.error || "Failed to delete room");
+  }
 }
 
 /** Join room as member (POST /rooms/:id/join) - required for calls */

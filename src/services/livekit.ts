@@ -14,7 +14,6 @@ import {
   ConnectionState,
   LocalVideoTrack,
   LocalAudioTrack,
-  createLocalTracks,
   VideoPresets,
 } from 'livekit-client';
 
@@ -93,6 +92,23 @@ export class LiveKitClient {
   private isCameraMuted = false;
   private isScreenSharing = false;
 
+  private ensureMediaDevicesAvailable(feature: 'microphone' | 'camera' | 'screen share'): void {
+    if (feature === 'screen share') {
+      if (!navigator.mediaDevices?.getDisplayMedia) {
+        throw new Error('Screen sharing is not available in this browser or context');
+      }
+      return;
+    }
+
+    if (!window.isSecureContext) {
+      throw new Error(`${feature === 'microphone' ? 'Microphone' : 'Camera'} requires a secure HTTPS connection`);
+    }
+
+    if (!navigator.mediaDevices?.getUserMedia) {
+      throw new Error(`${feature === 'microphone' ? 'Microphone' : 'Camera'} is not available in this browser or context`);
+    }
+  }
+
   // === Connection Management ===
 
   async connect(credentials: LiveKitCredentials): Promise<void> {
@@ -121,18 +137,19 @@ export class LiveKitClient {
   }
 
   async disconnect(): Promise<void> {
+    const room = this.room;
+
     // Unpublish local tracks
     await this.stopCamera();
     await this.stopMic();
     await this.stopScreenShare();
 
-    if (this.room) {
-      this.room.disconnect();
+    if (room) {
+      room.disconnect();
       this.room = null;
     }
 
     this.credentials = null;
-    this.handlers.onDisconnected?.();
   }
 
   private setupEventListeners(): void {
@@ -278,21 +295,15 @@ export class LiveKitClient {
     }
 
     try {
-      if (!this.localVideoTrack) {
-        const tracks = await createLocalTracks({
-          video: { resolution: VideoPresets.h720.resolution },
-          audio: false,
-        });
-        this.localVideoTrack = tracks.find(
-          (t) => t.kind === Track.Kind.Video
-        ) as LocalVideoTrack | undefined ?? null;
-      }
+      this.ensureMediaDevicesAvailable('camera');
+      await this.room.localParticipant.setCameraEnabled(true, {
+        resolution: VideoPresets.h720.resolution,
+      });
 
-      if (this.localVideoTrack) {
-        await this.room.localParticipant.publishTrack(this.localVideoTrack);
-        this.isCameraMuted = false;
-        this.handlers.onCameraMuted?.(false);
-      }
+      const publication = this.room.localParticipant.getTrackPublication(Track.Source.Camera);
+      this.localVideoTrack = (publication?.track as LocalVideoTrack | undefined) ?? null;
+      this.isCameraMuted = false;
+      this.handlers.onCameraMuted?.(false);
     } catch (err) {
       this.handleError(err instanceof Error ? err : new Error(String(err)));
       throw err;
@@ -300,9 +311,8 @@ export class LiveKitClient {
   }
 
   async disableCamera(): Promise<void> {
-    if (this.localVideoTrack && this.room) {
-      await this.room.localParticipant.unpublishTrack(this.localVideoTrack);
-      this.localVideoTrack.stop();
+    if (this.room) {
+      await this.room.localParticipant.setCameraEnabled(false);
       this.localVideoTrack = null;
       this.isCameraMuted = true;
       this.handlers.onCameraMuted?.(true);
@@ -324,21 +334,13 @@ export class LiveKitClient {
     }
 
     try {
-      if (!this.localAudioTrack) {
-        const tracks = await createLocalTracks({
-          video: false,
-          audio: true,
-        });
-        this.localAudioTrack = tracks.find(
-          (t) => t.kind === Track.Kind.Audio
-        ) as LocalAudioTrack | undefined ?? null;
-      }
+      this.ensureMediaDevicesAvailable('microphone');
+      await this.room.localParticipant.setMicrophoneEnabled(true);
 
-      if (this.localAudioTrack) {
-        await this.room.localParticipant.publishTrack(this.localAudioTrack);
-        this.isMicMuted = false;
-        this.handlers.onMicMuted?.(false);
-      }
+      const publication = this.room.localParticipant.getTrackPublication(Track.Source.Microphone);
+      this.localAudioTrack = (publication?.track as LocalAudioTrack | undefined) ?? null;
+      this.isMicMuted = false;
+      this.handlers.onMicMuted?.(false);
     } catch (err) {
       this.handleError(err instanceof Error ? err : new Error(String(err)));
       throw err;
@@ -346,9 +348,8 @@ export class LiveKitClient {
   }
 
   async disableMic(): Promise<void> {
-    if (this.localAudioTrack && this.room) {
-      await this.room.localParticipant.unpublishTrack(this.localAudioTrack);
-      this.localAudioTrack.stop();
+    if (this.room) {
+      await this.room.localParticipant.setMicrophoneEnabled(false);
       this.localAudioTrack = null;
       this.isMicMuted = true;
       this.handlers.onMicMuted?.(true);
@@ -374,6 +375,7 @@ export class LiveKitClient {
     }
 
     try {
+      this.ensureMediaDevicesAvailable('screen share');
       const publication = await this.room.localParticipant.setScreenShareEnabled(true);
       const publicationTrack = publication?.track as LocalVideoTrack | undefined;
       const fallbackTrack = this.room.localParticipant.getTrackPublication(Track.Source.ScreenShare)
