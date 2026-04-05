@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback, useRef } from "react";
 import { useNavigate } from "react-router-dom";
-import { MessageCircle, Video } from "lucide-react";
+import { MessageCircle, Trash2, Video } from "lucide-react";
 
 import { useAuth } from "../context/AuthContext";
 import Button from "../components/Button";
@@ -11,6 +11,7 @@ import {
   requestFriend,
   fetchFriends,
   searchUsers,
+  removeFriend,
 } from "../services/friends-api";
 import { getOrCreateDirectRoom } from "../services/rooms-api";
 import { FriendRequest, Friend, UserInfo } from "../types";
@@ -189,6 +190,19 @@ const FriendsPage: React.FC = () => {
     }
   };
 
+  const handleRemoveFriend = async (friend: Friend) => {
+    if (!token) return;
+
+    try {
+      await removeFriend(friend.username, token);
+      setFriends((current) => current.filter((item) => item.user_id !== friend.user_id));
+      setSuccess(`${friend.username} удалён из друзей`);
+      setTimeout(() => setSuccess(""), 3000);
+    } catch (err: any) {
+      setError(err.message || "Failed to remove friend");
+    }
+  };
+
   const goToChat = (friend: Friend) => {
     navigate(`/chat/${friend.friend_user_id}`, {
       state: { friendUsername: friend.username },
@@ -296,6 +310,14 @@ const FriendsPage: React.FC = () => {
                   title="Open private voice room"
                 >
                   <Video className="h-5 w-5" />
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => handleRemoveFriend(friend)}
+                  title="Remove friend"
+                >
+                  <Trash2 className="h-5 w-5 text-red-500" />
                 </Button>
               </div>
             </div>

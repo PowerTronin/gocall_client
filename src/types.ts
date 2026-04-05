@@ -77,3 +77,11 @@ export interface IChatMessageResponse {
   text: string,
   created_at: string,
 }
+
+export interface ConversationInfo {
+  user_id: string;
+  username: string;
+  name: string;
+  last_message: string;
+  last_message_at: string;
+}

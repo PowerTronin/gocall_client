@@ -12,34 +12,9 @@ import { AuthProvider } from "./context/AuthContext";
 import { isDesktop } from "./utils/platform";
 import SettingsPage from "./pages/SettingsPage";
 import Loader from "./components/Loader";
-import { WebSocketProvider, useWebSocketContext } from "./context/WebSocketContext";
-import { CallProvider } from "./context/CallContext";
 import { RoomVoiceProvider } from "./context/RoomVoiceContext";
-import {
-  IncomingCallModal,
-  OutgoingCallModal,
-  ActiveCallView,
-} from "./components/Call";
 import ChatPage from "./pages/ChatPage";
 import RoomVoiceDock from "./components/RoomVoiceDock";
-
-// Inner component that has access to WebSocket context
-const AppWithCallProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const { wirechatClient } = useWebSocketContext();
-
-  return (
-    <CallProvider wirechatClient={wirechatClient}>
-      <RoomVoiceProvider>
-        {children}
-        {/* Global call modals - shown on any page */}
-        <IncomingCallModal />
-        <OutgoingCallModal />
-        <ActiveCallView />
-        <RoomVoiceDock />
-      </RoomVoiceProvider>
-    </CallProvider>
-  );
-};
 
 function App() {
   const [apiAvailable, setApiAvailable] = useState<boolean | null>(null);
@@ -93,8 +68,7 @@ function App() {
   return (
     <Router>
       <AuthProvider>
-        <WebSocketProvider>
-          <AppWithCallProvider>
+        <RoomVoiceProvider>
             <Routes>
               <Route path="/login" element={<LoginSignupPage />} />
               {/* Protected routes inside common Layout */}
@@ -108,8 +82,8 @@ function App() {
                 <Route path="/" element={<Navigate to="/home" />} />
               </Route>
             </Routes>
-          </AppWithCallProvider>
-        </WebSocketProvider>
+            <RoomVoiceDock />
+        </RoomVoiceProvider>
       </AuthProvider>
     </Router>
   );
