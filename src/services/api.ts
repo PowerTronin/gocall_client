@@ -41,20 +41,23 @@ export async function checkAPIStatus(): Promise<boolean> {
 
 export async function validateToken(token: string): Promise<boolean> {
   try {
-    // Decode JWT locally - no server call needed
     const user = decodeJWT(token);
     if (!user) return false;
 
-    // Check expiration (JWT exp claim is in seconds)
     const base64Url = token.split('.')[1];
     const base64 = base64Url.replace(/-/g, '+').replace(/_/g, '/');
     const payload = JSON.parse(atob(base64));
 
     if (payload.exp && payload.exp * 1000 < Date.now()) {
-      return false; // Token expired
+      return false;
     }
 
-    return true;
+    const response = await fetch(`${API_BASE_URL}/user/me`, {
+      method: "GET",
+      headers: headers(token),
+    });
+
+    return response.ok;
   } catch (error) {
     console.error("Token validation error:", error);
     return false;

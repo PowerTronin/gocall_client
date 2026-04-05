@@ -31,8 +31,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       const me = await getMe(storedToken);
       setUser(me);
     } catch (error) {
-      // Fall back to JWT payload when profile fetch fails.
-      setUser(userInfo);
+      console.error("Failed to hydrate current user:", error);
+      await removeToken();
+      setTokenState(null);
+      setUser(null);
     }
   };
 
