@@ -91,10 +91,10 @@ function App() {
   }
 
   return (
-    <AuthProvider>
-      <WebSocketProvider>
-        <AppWithCallProvider>
-          <Router>
+    <Router>
+      <AuthProvider>
+        <WebSocketProvider>
+          <AppWithCallProvider>
             <Routes>
               <Route path="/login" element={<LoginSignupPage />} />
               {/* Protected routes inside common Layout */}
@@ -108,10 +108,10 @@ function App() {
                 <Route path="/" element={<Navigate to="/home" />} />
               </Route>
             </Routes>
-          </Router>
-        </AppWithCallProvider>
-      </WebSocketProvider>
-    </AuthProvider>
+          </AppWithCallProvider>
+        </WebSocketProvider>
+      </AuthProvider>
+    </Router>
   );
 }
 
