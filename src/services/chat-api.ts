@@ -1,5 +1,6 @@
 import { IChatMessageResponse } from "../types";
 import { API_BASE_URL, WS_BASE_URL } from "./config";
+import { headers } from "./api";
 
 export async function fetchDirectChatHistory(
   token: string,
@@ -12,6 +13,7 @@ export async function fetchDirectChatHistory(
 
   const response = await fetch(`${API_BASE_URL}/chat/history?${query.toString()}`, {
     method: "GET",
+    headers: headers(token),
   });
 
   if (!response.ok) {
