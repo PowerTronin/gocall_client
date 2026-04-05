@@ -16,7 +16,7 @@ import {
 import { FriendRequest, Friend, UserInfo } from "../types";
 
 const FriendsPage: React.FC = () => {
-  const { token } = useAuth();
+  const { token, user: currentUser } = useAuth();
   const navigate = useNavigate();
   const { initiateCall, state: callState } = useCall();
 
@@ -93,7 +93,10 @@ const FriendsPage: React.FC = () => {
       try {
         const results = await searchUsers(q, token, controller.signal);
         const filtered = results.filter(
-          (user) => !friends.some((friend) => friend.username === user.username)
+          (user) =>
+            user.username !== currentUser?.username &&
+            user.id !== currentUser?.id &&
+            !friends.some((friend) => friend.username === user.username)
         );
         setSearchResults(filtered);
         setError("");
@@ -109,7 +112,7 @@ const FriendsPage: React.FC = () => {
         }
       }
     },
-    [token, friends]
+    [token, friends, currentUser]
   );
 
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -145,11 +148,20 @@ const FriendsPage: React.FC = () => {
 
   const handleSendFriendRequest = async (targetUser: { id: number; username: string }) => {
     if (!token) return;
+    if (
+      targetUser.username === currentUser?.username ||
+      targetUser.id === currentUser?.id
+    ) {
+      setError("Нельзя добавить себя в друзья");
+      return;
+    }
     try {
-      await requestFriend(targetUser.id, token);
-      setSuccess(`Friend request sent to ${targetUser.username}`);
+      await requestFriend(targetUser.username, token);
+      await loadData();
+      setSuccess(`${targetUser.username} добавлен в друзья`);
       setTimeout(() => setSuccess(""), 3000);
       setSearchResults((prev) => prev.filter((foundUser) => foundUser.id !== targetUser.id));
+      setSearchQuery("");
     } catch (err: any) {
       setError(err.message || "Failed to send friend request");
     }
@@ -158,7 +170,7 @@ const FriendsPage: React.FC = () => {
   const handleAcceptFriendRequest = async (request: FriendRequest) => {
     if (!token) return;
     try {
-      await acceptFriendRequest(Number(request.from_user_id), token);
+      await acceptFriendRequest(request.id, token);
       await loadData();
       setSuccess("Friend request accepted");
       setTimeout(() => setSuccess(""), 3000);
@@ -170,7 +182,7 @@ const FriendsPage: React.FC = () => {
   const handleDeclineFriendRequest = async (request: FriendRequest) => {
     if (!token) return;
     try {
-      await declineFriendRequest(Number(request.from_user_id), token);
+      await declineFriendRequest(request.id, token);
       await loadData();
       setSuccess("Friend request declined");
       setTimeout(() => setSuccess(""), 3000);
@@ -223,7 +235,7 @@ const FriendsPage: React.FC = () => {
               >
                 <span>{user.username}</span>
                 <Button variant="primary" size="sm" onClick={() => handleSendFriendRequest(user)}>
-                  Отправить заявку
+                  Добавить в друзья
                 </Button>
               </div>
             ))}
@@ -260,7 +272,7 @@ const FriendsPage: React.FC = () => {
 
       <div className="grid gap-4">
         {friends.length === 0 ? (
-          <p className="text-gray-500">Нет друзей. Отправьте заявку, чтобы добавить друзей.</p>
+          <p className="text-gray-500">Нет друзей. Найдите пользователя и добавьте его в друзья.</p>
         ) : (
           friends.map((friend) => (
             <div

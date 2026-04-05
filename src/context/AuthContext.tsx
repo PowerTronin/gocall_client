@@ -1,6 +1,6 @@
 import React, { createContext, useContext, useEffect, useState } from "react";
 import { getToken, saveToken, removeToken } from "../adapters/token-adapter";
-import { decodeJWT } from "../services/api";
+import { decodeJWT, getMe } from "../services/api";
 import { User } from "../types";
 
 interface AuthContextType {
@@ -17,21 +17,32 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
 
+  const hydrateUser = async (storedToken: string) => {
+    const userInfo = decodeJWT(storedToken);
+    if (!userInfo) {
+      console.error("Failed to decode token");
+      await removeToken();
+      setTokenState(null);
+      setUser(null);
+      return;
+    }
+
+    try {
+      const me = await getMe(storedToken);
+      setUser(me);
+    } catch (error) {
+      // Fall back to JWT payload when profile fetch fails.
+      setUser(userInfo);
+    }
+  };
+
   useEffect(() => {
     const loadTokenAndUser = async () => {
       const storedToken = await getToken();
       setTokenState(storedToken);
 
       if (storedToken) {
-        const userInfo = decodeJWT(storedToken);
-        if (userInfo) {
-          setUser(userInfo);
-        } else {
-          console.error("Failed to decode token");
-          removeToken();
-          setTokenState(null);
-          setUser(null);
-        }
+        await hydrateUser(storedToken);
       }
 
       setLoading(false);
@@ -44,15 +55,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setTokenState(newToken);
     if (newToken) {
       await saveToken(newToken);
-      const userInfo = decodeJWT(newToken);
-      if (userInfo) {
-        setUser(userInfo);
-      } else {
-        console.error("Failed to decode token");
-        removeToken();
-        setTokenState(null);
-        setUser(null);
-      }
+      await hydrateUser(newToken);
     } else {
       await removeToken();
       setUser(null);

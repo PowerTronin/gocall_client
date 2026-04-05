@@ -63,7 +63,7 @@ export async function validateToken(token: string): Promise<boolean> {
   
 export async function login(username: string, password: string): Promise<string> {
   try {
-    const response = await fetch(`${API_BASE_URL}/login`, {
+    const response = await fetch(`${API_BASE_URL}/auth/login`, {
       method: "POST",
       headers: headers(),
       body: JSON.stringify({ username, password }),
@@ -83,7 +83,7 @@ export async function login(username: string, password: string): Promise<string>
 
 export async function register(username: string, password: string): Promise<string> {
   try {
-    const response = await fetch(`${API_BASE_URL}/register`, {
+    const response = await fetch(`${API_BASE_URL}/auth/register`, {
       method: "POST",
       headers: headers(),
       body: JSON.stringify({ username, password }),
@@ -112,18 +112,60 @@ export async function getUserID(token: string): Promise<string> {
 // Backward-compatible fallback for legacy UI code.
 // Current backend has no public GET /api/user/:id endpoint.
 export async function getUserInfo(token: string, uuid: string): Promise<UserInfo> {
-  void token;
+  const response = await fetch(`${API_BASE_URL}/user/${uuid}`, {
+    method: "GET",
+    headers: headers(token),
+  });
+
+  if (!response.ok) {
+    const errorData = await response.json().catch(() => ({}));
+    throw new Error(errorData.error || "Failed to fetch user info");
+  }
+
+  const payload = (await response.json()) as {
+    user?:
+      | UserInfo
+      | {
+          ID?: number;
+          Username?: string;
+          Name?: string;
+          id?: number;
+          username?: string;
+          name?: string;
+        };
+  };
+
+  const user = payload.user;
+  if (!user) {
+    throw new Error("User info is missing in response");
+  }
+
+  const legacyUser = user as {
+    ID?: number;
+    Username?: string;
+    Name?: string;
+    id?: number;
+    username?: string;
+    name?: string;
+  };
+
   return {
-    id: Number(uuid) || 0,
-    username: `user-${uuid}`,
-    name: `user-${uuid}`,
+    id: typeof legacyUser.id === "number" ? legacyUser.id : (legacyUser.ID ?? 0),
+    username: legacyUser.username ?? legacyUser.Username ?? `user-${uuid}`,
+    name: legacyUser.name ?? legacyUser.Name ?? `user-${uuid}`,
   };
 }
 
 export async function getMe(token: string): Promise<User> {
-  const user = decodeJWT(token);
-  if (!user) {
-    throw new Error("Invalid token");
+  const response = await fetch(`${API_BASE_URL}/user/me`, {
+    method: "GET",
+    headers: headers(token),
+  });
+
+  if (!response.ok) {
+    const errorData = await response.json().catch(() => ({}));
+    throw new Error(errorData.error || "Failed to fetch current user");
   }
-  return user;
+
+  return response.json();
 }
