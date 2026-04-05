@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
 import {
   ArrowLeft,
@@ -13,16 +13,15 @@ import {
   Radio,
 } from "lucide-react";
 import { motion } from "framer-motion";
+import { AudioTrack, Track, VideoTrack } from "livekit-client";
 
 import { useAuth } from "../context/AuthContext";
+import { useRoomVoice } from "../context/RoomVoiceContext";
 import {
   fetchRoomState,
   joinRoomAsMember,
-  joinRoomVoice,
-  leaveRoomVoice,
   RoomStateResponse,
   RoomVoiceParticipantState,
-  updateRoomVoiceMedia,
 } from "../services/rooms-api";
 
 interface ControlButtonProps {
@@ -67,16 +66,70 @@ const ControlButton: React.FC<ControlButtonProps> = ({
 const VoiceTile: React.FC<{
   participant: RoomVoiceParticipantState;
   isCurrentUser: boolean;
-}> = ({ participant, isCurrentUser }) => {
+  videoTrack?: Track;
+  audioTrack?: Track;
+}> = ({ participant, isCurrentUser, videoTrack, audioTrack }) => {
   const initials = (participant.name || participant.username || "?").slice(0, 1).toUpperCase();
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const audioRef = useRef<HTMLAudioElement>(null);
+
+  useEffect(() => {
+    if (!videoRef.current || !videoTrack || participant.is_screen_sharing) {
+      return undefined;
+    }
+
+    const track = videoTrack as VideoTrack;
+    track.attach(videoRef.current);
+
+    return () => {
+      track.detach(videoRef.current!);
+    };
+  }, [participant.is_screen_sharing, videoTrack]);
+
+  useEffect(() => {
+    if (!videoRef.current || !videoTrack || !participant.is_screen_sharing) {
+      return undefined;
+    }
+
+    const track = videoTrack as VideoTrack;
+    track.attach(videoRef.current);
+
+    return () => {
+      track.detach(videoRef.current!);
+    };
+  }, [participant.is_screen_sharing, videoTrack]);
+
+  useEffect(() => {
+    if (isCurrentUser || !audioRef.current || !audioTrack) {
+      return undefined;
+    }
+
+    const track = audioTrack as AudioTrack;
+    track.attach(audioRef.current);
+
+    return () => {
+      track.detach(audioRef.current!);
+    };
+  }, [audioTrack, isCurrentUser]);
 
   return (
     <div className="relative rounded-xl overflow-hidden bg-gray-800 aspect-video shadow-lg">
-      <div className="w-full h-full flex items-center justify-center">
-        <div className="w-16 h-16 rounded-full bg-primary/30 flex items-center justify-center">
-          <span className="text-2xl font-bold text-white">{initials}</span>
+      {!isCurrentUser && <audio ref={audioRef} autoPlay playsInline />}
+      {videoTrack && (participant.is_camera_enabled || participant.is_screen_sharing) ? (
+        <video
+          ref={videoRef}
+          autoPlay
+          playsInline
+          muted={isCurrentUser}
+          className="w-full h-full object-cover"
+        />
+      ) : (
+        <div className="w-full h-full flex items-center justify-center">
+          <div className="w-16 h-16 rounded-full bg-primary/30 flex items-center justify-center">
+            <span className="text-2xl font-bold text-white">{initials}</span>
+          </div>
         </div>
-      </div>
+      )}
 
       <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/70 to-transparent p-3">
         <div className="flex items-center justify-between">
@@ -120,6 +173,15 @@ export default function RoomPage(): JSX.Element {
   const navigate = useNavigate();
   const location = useLocation();
   const { token, user } = useAuth();
+  const {
+    state: roomVoiceState,
+    joinRoomVoiceSession,
+    leaveRoomVoiceSession,
+    toggleRoomVoiceMic,
+    toggleRoomVoiceCamera,
+    toggleRoomVoiceScreenShare,
+    clearRoomVoiceError,
+  } = useRoomVoice();
 
   const routeRoomName =
     (location.state as { roomName?: string } | null)?.roomName ??
@@ -186,19 +248,28 @@ export default function RoomPage(): JSX.Element {
   const roomName = roomState?.room.name || routeRoomName;
   const voiceParticipants = roomState?.voice_participants ?? [];
   const members = roomState?.members ?? [];
-  const inVoice = roomState?.in_voice ?? false;
+  const isCurrentRoomSession =
+    roomVoiceState.roomId === roomIdentifier && roomVoiceState.status !== "idle";
+  const inVoice = Boolean(roomState?.in_voice) || isCurrentRoomSession;
+  const liveParticipantsByUserId = useMemo(
+    () =>
+      new Map(
+        roomVoiceState.participants.map((participant) => [participant.identity, participant])
+      ),
+    [roomVoiceState.participants]
+  );
   const myVoiceState = useMemo(
     () => voiceParticipants.find((participant) => participant.user_id === user?.user_id) ?? null,
     [voiceParticipants, user?.user_id]
   );
 
-  const canToggleMedia = inVoice && !isSubmitting;
+  const canToggleMedia = isCurrentRoomSession && roomVoiceState.status === "active" && !isSubmitting;
 
   const handleJoinVoice = async () => {
     if (!token || !roomIdentifier) return;
     setIsSubmitting(true);
     try {
-      await joinRoomVoice(roomIdentifier, token);
+      await joinRoomVoiceSession(roomIdentifier, roomName || routeRoomName || roomIdentifier);
       await loadRoomState();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to join voice");
@@ -208,10 +279,10 @@ export default function RoomPage(): JSX.Element {
   };
 
   const handleLeaveVoice = async () => {
-    if (!token || !roomIdentifier) return;
+    if (!roomIdentifier) return;
     setIsSubmitting(true);
     try {
-      await leaveRoomVoice(roomIdentifier, token);
+      await leaveRoomVoiceSession(roomIdentifier);
       await loadRoomState();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to leave voice");
@@ -220,33 +291,77 @@ export default function RoomPage(): JSX.Element {
     }
   };
 
-  const handleUpdateMedia = async (
-    patch: Partial<{
-      is_mic_enabled: boolean;
-      is_camera_enabled: boolean;
-      is_screen_sharing: boolean;
-    }>
-  ) => {
-    if (!token || !roomIdentifier || !inVoice) return;
+  const handleToggleMic = async () => {
+    if (!isCurrentRoomSession) return;
     setIsSubmitting(true);
     try {
-      await updateRoomVoiceMedia(roomIdentifier, patch, token);
+      await toggleRoomVoiceMic();
       await loadRoomState();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to update media state");
+      setError(err instanceof Error ? err.message : "Failed to toggle microphone");
     } finally {
       setIsSubmitting(false);
     }
   };
 
+  const handleToggleCamera = async () => {
+    if (!isCurrentRoomSession) return;
+    setIsSubmitting(true);
+    try {
+      await toggleRoomVoiceCamera();
+      await loadRoomState();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to toggle camera");
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const handleToggleScreenShare = async () => {
+    if (!isCurrentRoomSession) return;
+    setIsSubmitting(true);
+    try {
+      await toggleRoomVoiceScreenShare();
+      await loadRoomState();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to toggle screen share");
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  useEffect(() => {
+    if (roomVoiceState.error) {
+      setError(roomVoiceState.error);
+      clearRoomVoiceError();
+    }
+  }, [clearRoomVoiceError, roomVoiceState.error]);
+
   const getGridClass = () => {
-    const count = Math.max(voiceParticipants.length, 1);
+    const count = Math.max(displayedVoiceParticipants.length, 1);
     if (count <= 1) return "grid-cols-1";
     if (count === 2) return "grid-cols-2";
     if (count <= 4) return "grid-cols-2";
     if (count <= 6) return "grid-cols-3";
     return "grid-cols-4";
   };
+
+  const displayedVoiceParticipants = voiceParticipants.length > 0
+    ? voiceParticipants
+    : isCurrentRoomSession && user
+      ? [{
+          id: user.id,
+          user_id: user.user_id,
+          username: user.username,
+          name: user.name,
+          is_online: user.is_online,
+          is_mic_enabled: !roomVoiceState.localMuted,
+          is_camera_enabled: !roomVoiceState.localCameraOff,
+          is_screen_sharing: roomVoiceState.screenSharing,
+          joined_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+        }]
+      : [];
 
   if (isLoading) {
     return (
@@ -287,7 +402,7 @@ export default function RoomPage(): JSX.Element {
           <div>
             <h1 className="text-lg font-semibold text-white">Room: {roomName}</h1>
             <p className="text-sm text-white/70">
-              {members.length} members, {voiceParticipants.length} in voice
+              {members.length} members, {displayedVoiceParticipants.length} in voice
             </p>
           </div>
         </div>
@@ -322,7 +437,7 @@ export default function RoomPage(): JSX.Element {
       <main className="flex-1 overflow-hidden">
         <div className="h-full flex flex-col">
           <div className="flex-1 p-4 overflow-auto">
-            {voiceParticipants.length === 0 ? (
+              {displayedVoiceParticipants.length === 0 ? (
               <div className="h-full flex items-center justify-center">
                 <div className="text-center max-w-md p-8">
                   <div className="w-20 h-20 rounded-full bg-gray-800 flex items-center justify-center mx-auto mb-6">
@@ -346,11 +461,13 @@ export default function RoomPage(): JSX.Element {
               </div>
             ) : (
               <div className={`grid ${getGridClass()} gap-4 h-full`}>
-                {voiceParticipants.map((participant) => (
+                {displayedVoiceParticipants.map((participant) => (
                   <VoiceTile
                     key={participant.user_id}
                     participant={participant}
                     isCurrentUser={participant.user_id === user?.user_id}
+                    videoTrack={liveParticipantsByUserId.get(participant.user_id)?.videoTrack}
+                    audioTrack={liveParticipantsByUserId.get(participant.user_id)?.audioTrack}
                   />
                 ))}
               </div>
@@ -361,7 +478,7 @@ export default function RoomPage(): JSX.Element {
             <h2 className="text-sm font-semibold text-white/80 mb-2">Room Members</h2>
             <div className="flex flex-wrap gap-2">
               {members.map((member) => {
-                const isInVoice = voiceParticipants.some(
+                const isInVoice = displayedVoiceParticipants.some(
                   (participant) => participant.user_id === member.user_id
                 );
                 return (
@@ -388,36 +505,36 @@ export default function RoomPage(): JSX.Element {
             <ControlButton
               icon={<Mic className="w-5 h-5 text-white" />}
               activeIcon={<MicOff className="w-5 h-5 text-red-400" />}
-              isActive={!myVoiceState?.is_mic_enabled}
+              isActive={isCurrentRoomSession ? roomVoiceState.localMuted : !myVoiceState?.is_mic_enabled}
               disabled={!canToggleMedia}
-              onClick={() =>
-                void handleUpdateMedia({ is_mic_enabled: !myVoiceState?.is_mic_enabled })
-              }
-              label={myVoiceState?.is_mic_enabled ? "Mute" : "Unmute"}
+              onClick={() => void handleToggleMic()}
+              label={isCurrentRoomSession && roomVoiceState.localMuted ? "Unmute" : "Mute"}
             />
 
             <ControlButton
               icon={<Video className="w-5 h-5 text-white" />}
               activeIcon={<VideoOff className="w-5 h-5 text-red-400" />}
-              isActive={!myVoiceState?.is_camera_enabled}
+              isActive={isCurrentRoomSession ? roomVoiceState.localCameraOff : !myVoiceState?.is_camera_enabled}
               disabled={!canToggleMedia}
-              onClick={() =>
-                void handleUpdateMedia({ is_camera_enabled: !myVoiceState?.is_camera_enabled })
+              onClick={() => void handleToggleCamera()}
+              label={
+                isCurrentRoomSession && roomVoiceState.localCameraOff
+                  ? "Turn on camera"
+                  : "Turn off camera"
               }
-              label={myVoiceState?.is_camera_enabled ? "Turn off camera" : "Turn on camera"}
             />
 
             <ControlButton
               icon={<Monitor className="w-5 h-5 text-white" />}
               activeIcon={<MonitorOff className="w-5 h-5 text-red-400" />}
-              isActive={Boolean(myVoiceState?.is_screen_sharing)}
+              isActive={isCurrentRoomSession ? roomVoiceState.screenSharing : Boolean(myVoiceState?.is_screen_sharing)}
               disabled={!canToggleMedia}
-              onClick={() =>
-                void handleUpdateMedia({
-                  is_screen_sharing: !myVoiceState?.is_screen_sharing,
-                })
+              onClick={() => void handleToggleScreenShare()}
+              label={
+                isCurrentRoomSession && roomVoiceState.screenSharing
+                  ? "Stop sharing"
+                  : "Share screen"
               }
-              label={myVoiceState?.is_screen_sharing ? "Stop sharing" : "Share screen"}
             />
 
             <ControlButton

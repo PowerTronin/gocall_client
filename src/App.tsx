@@ -14,12 +14,14 @@ import SettingsPage from "./pages/SettingsPage";
 import Loader from "./components/Loader";
 import { WebSocketProvider, useWebSocketContext } from "./context/WebSocketContext";
 import { CallProvider } from "./context/CallContext";
+import { RoomVoiceProvider } from "./context/RoomVoiceContext";
 import {
   IncomingCallModal,
   OutgoingCallModal,
   ActiveCallView,
 } from "./components/Call";
 import ChatPage from "./pages/ChatPage";
+import RoomVoiceDock from "./components/RoomVoiceDock";
 
 // Inner component that has access to WebSocket context
 const AppWithCallProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
@@ -27,11 +29,14 @@ const AppWithCallProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   return (
     <CallProvider wirechatClient={wirechatClient}>
-      {children}
-      {/* Global call modals - shown on any page */}
-      <IncomingCallModal />
-      <OutgoingCallModal />
-      <ActiveCallView />
+      <RoomVoiceProvider>
+        {children}
+        {/* Global call modals - shown on any page */}
+        <IncomingCallModal />
+        <OutgoingCallModal />
+        <ActiveCallView />
+        <RoomVoiceDock />
+      </RoomVoiceProvider>
     </CallProvider>
   );
 };

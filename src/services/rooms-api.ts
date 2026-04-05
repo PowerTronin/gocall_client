@@ -40,6 +40,14 @@ export interface RoomStateResponse {
   in_voice: boolean;
 }
 
+export interface RoomVoiceCredentialsResponse {
+  url: string;
+  token: string;
+  room_name: string;
+  identity: string;
+  name: string;
+}
+
 // Функция для получения списка приглашений в комнаты (GET /api/rooms/invites)
 export async function fetchRoomInvites(token: string): Promise<RoomInvite[]> {
   void token;
@@ -177,6 +185,21 @@ export async function updateRoomVoiceMedia(
     const errorData = await response.json().catch(() => ({}));
     throw new Error(errorData.error || "Failed to update room voice media");
   }
+}
+
+export async function fetchRoomVoiceCredentials(
+  roomID: string,
+  token: string
+): Promise<RoomVoiceCredentialsResponse> {
+  const response = await fetch(`${API_BASE_URL}/rooms/${roomID}/voice/credentials`, {
+    method: "GET",
+    headers: headers(token),
+  });
+  if (!response.ok) {
+    const errorData = await response.json().catch(() => ({}));
+    throw new Error(errorData.error || "Failed to fetch room voice credentials");
+  }
+  return response.json();
 }
 
 /** Получаем приглашённые комнаты - not implemented in WireChat */
