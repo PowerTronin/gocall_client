@@ -2,6 +2,44 @@ import { RoomInvite, Room } from "../types";
 import { headers } from "./api";
 import { API_BASE_URL } from "./config";
 
+export interface RoomMemberState {
+  id: number;
+  user_id: string;
+  username: string;
+  name: string;
+  is_online: boolean;
+  role: string;
+  joined_at: string;
+}
+
+export interface RoomVoiceParticipantState {
+  id: number;
+  user_id: string;
+  username: string;
+  name: string;
+  is_online: boolean;
+  is_mic_enabled: boolean;
+  is_camera_enabled: boolean;
+  is_screen_sharing: boolean;
+  joined_at: string;
+  updated_at: string;
+}
+
+export interface RoomStateResponse {
+  room: {
+    id: number;
+    room_id: string;
+    user_id: string;
+    name: string;
+    type: string;
+    password: string;
+    created_at: string;
+  };
+  members: RoomMemberState[];
+  voice_participants: RoomVoiceParticipantState[];
+  in_voice: boolean;
+}
+
 // Функция для получения списка приглашений в комнаты (GET /api/rooms/invites)
 export async function fetchRoomInvites(token: string): Promise<RoomInvite[]> {
   void token;
@@ -24,7 +62,7 @@ export async function declineRoomInvite(inviteId: number, token: string): Promis
 
 /** Получаем комнаты пользователя (GET /rooms) */
 export async function fetchMyRooms(token: string): Promise<Room[]> {
-  const response = await fetch(`${API_BASE_URL}/rooms`, {
+  const response = await fetch(`${API_BASE_URL}/rooms/mine`, {
     method: "GET",
     headers: headers(token),
   });
@@ -34,9 +72,9 @@ export async function fetchMyRooms(token: string): Promise<Room[]> {
   const data = await response.json();
   // Server returns array directly, or { rooms: [...] }
   const rooms = Array.isArray(data) ? data : (Array.isArray(data.rooms) ? data.rooms : []);
-  return rooms.map((r: { id: number; name: string; type: string; owner_id: number | null; created_at: string }) => ({
-    room_id: String(r.id),
-    user_id: r.owner_id ? String(r.owner_id) : '',
+  return rooms.map((r: { id?: number; room_id: string; name: string; type: string; user_id: string; created_at: string }) => ({
+    room_id: r.room_id,
+    user_id: r.user_id,
     name: r.name,
     type: r.type,
     created_at: r.created_at,
@@ -46,7 +84,7 @@ export async function fetchMyRooms(token: string): Promise<Room[]> {
 /** Создание комнаты (POST /rooms) */
 export async function createRoom(name: string, token: string): Promise<Room> {
   const type = "public"; // можно расширить по необходимости
-  const response = await fetch(`${API_BASE_URL}/rooms`, {
+  const response = await fetch(`${API_BASE_URL}/rooms/create`, {
     method: "POST",
     headers: headers(token),
     body: JSON.stringify({ name, type }),
@@ -57,11 +95,11 @@ export async function createRoom(name: string, token: string): Promise<Room> {
   }
   const data = await response.json();
   return {
-    room_id: String(data.id),
+    room_id: data.roomID,
     name: data.name,
     type: data.type,
-    user_id: String(data.owner_id),
-    created_at: data.created_at,
+    user_id: "",
+    created_at: new Date().toISOString(),
   };
 }
 
@@ -87,6 +125,60 @@ export async function joinRoomAsMember(roomID: string, token: string): Promise<v
   }
 }
 
+export async function fetchRoomState(roomID: string, token: string): Promise<RoomStateResponse> {
+  const response = await fetch(`${API_BASE_URL}/rooms/${roomID}/state`, {
+    method: "GET",
+    headers: headers(token),
+  });
+  if (!response.ok) {
+    const errorData = await response.json().catch(() => ({}));
+    throw new Error(errorData.error || "Failed to fetch room state");
+  }
+  return response.json();
+}
+
+export async function joinRoomVoice(roomID: string, token: string): Promise<void> {
+  const response = await fetch(`${API_BASE_URL}/rooms/${roomID}/voice/join`, {
+    method: "POST",
+    headers: headers(token),
+  });
+  if (!response.ok) {
+    const errorData = await response.json().catch(() => ({}));
+    throw new Error(errorData.error || "Failed to join room voice");
+  }
+}
+
+export async function leaveRoomVoice(roomID: string, token: string): Promise<void> {
+  const response = await fetch(`${API_BASE_URL}/rooms/${roomID}/voice/leave`, {
+    method: "POST",
+    headers: headers(token),
+  });
+  if (!response.ok) {
+    const errorData = await response.json().catch(() => ({}));
+    throw new Error(errorData.error || "Failed to leave room voice");
+  }
+}
+
+export async function updateRoomVoiceMedia(
+  roomID: string,
+  payload: {
+    is_mic_enabled?: boolean;
+    is_camera_enabled?: boolean;
+    is_screen_sharing?: boolean;
+  },
+  token: string
+): Promise<void> {
+  const response = await fetch(`${API_BASE_URL}/rooms/${roomID}/voice/media`, {
+    method: "PUT",
+    headers: headers(token),
+    body: JSON.stringify(payload),
+  });
+  if (!response.ok) {
+    const errorData = await response.json().catch(() => ({}));
+    throw new Error(errorData.error || "Failed to update room voice media");
+  }
+}
+
 /** Получаем приглашённые комнаты - not implemented in WireChat */
 export async function fetchInvitedRooms(_token: string): Promise<Room[]> {
   // Room invites not implemented in WireChat server - return empty array
@@ -99,18 +191,28 @@ export async function inviteFriendToRoom(
   username: string,
   token: string
 ): Promise<void> {
-  void roomID;
-  void username;
-  void token;
-  throw new Error("Room invite endpoint is not implemented on this server");
+  const response = await fetch(`${API_BASE_URL}/rooms/invite`, {
+    method: "POST",
+    headers: headers(token),
+    body: JSON.stringify({ roomID, username }),
+  });
+  if (!response.ok) {
+    const errorData = await response.json().catch(() => ({}));
+    throw new Error(errorData.error || "Failed to invite friend to room");
+  }
 }
 
 /** Обновление комнаты (PUT /rooms/:id) */
 export async function updateRoom(roomID: string, name: string, token: string): Promise<void> {
-  void roomID;
-  void name;
-  void token;
-  throw new Error("Room update endpoint is not implemented on this server");
+  const response = await fetch(`${API_BASE_URL}/rooms/${roomID}`, {
+    method: "PUT",
+    headers: headers(token),
+    body: JSON.stringify({ name, type: "public", password: "" }),
+  });
+  if (!response.ok) {
+    const errorData = await response.json().catch(() => ({}));
+    throw new Error(errorData.error || "Failed to update room");
+  }
 }
 
 /** Create or get direct message room with a user (POST /rooms/direct) */

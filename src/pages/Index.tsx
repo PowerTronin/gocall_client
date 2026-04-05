@@ -103,8 +103,8 @@ const Index: React.FC = () => {
 
   // Обработка присоединения к комнате - navigate using room name
   const handleJoinRoom = (room: Room) => {
-    navigate(`/room/${encodeURIComponent(room.name)}`, {
-      state: { roomId: parseInt(room.room_id, 10) }
+    navigate(`/room/${encodeURIComponent(room.room_id)}`, {
+      state: { roomName: room.name }
     });
   };
 

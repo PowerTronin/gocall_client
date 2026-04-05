@@ -125,11 +125,9 @@ const RoomsPage: React.FC = () => {
   };
 
   // Функция присоединения к комнате (навигация к RoomPage)
-  // Use room name in URL since WebSocket protocol uses names, not IDs
-  // Pass room_id in state for call functionality
   const handleJoinRoom = (room: Room) => {
-    navigate(`/room/${encodeURIComponent(room.name)}`, {
-      state: { roomId: parseInt(room.room_id, 10) }
+    navigate(`/room/${encodeURIComponent(room.room_id)}`, {
+      state: { roomName: room.name }
     });
   };
 
