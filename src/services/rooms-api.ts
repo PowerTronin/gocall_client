@@ -239,23 +239,24 @@ export async function updateRoom(roomID: string, name: string, token: string): P
 }
 
 /** Create or get direct message room with a user (POST /rooms/direct) */
-export interface DirectRoomResponse {
-  id: number;
-  name: string;
-  type: string;
-  owner_id: number | null;
-  created_at: string;
-}
-
-export async function getOrCreateDirectRoom(userId: number, token: string): Promise<DirectRoomResponse> {
+export async function getOrCreateDirectRoom(userId: string, token: string): Promise<Room> {
   const response = await fetch(`${API_BASE_URL}/rooms/direct`, {
     method: "POST",
     headers: headers(token),
-    body: JSON.stringify({ user_id: userId }),
+    body: JSON.stringify({ friend_user_id: userId }),
   });
   if (!response.ok) {
     const errorData = await response.json();
     throw new Error(errorData.error || "Failed to create direct room");
   }
-  return response.json();
+  const payload = await response.json();
+  const room = payload.room ?? payload;
+
+  return {
+    room_id: room.room_id,
+    user_id: room.user_id,
+    name: room.name,
+    type: room.type,
+    created_at: room.created_at,
+  };
 }

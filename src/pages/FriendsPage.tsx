@@ -3,7 +3,6 @@ import { useNavigate } from "react-router-dom";
 import { MessageCircle, Video } from "lucide-react";
 
 import { useAuth } from "../context/AuthContext";
-import { useCall } from "../context/CallContext";
 import Button from "../components/Button";
 import {
   fetchFriendRequests,
@@ -13,12 +12,12 @@ import {
   fetchFriends,
   searchUsers,
 } from "../services/friends-api";
+import { getOrCreateDirectRoom } from "../services/rooms-api";
 import { FriendRequest, Friend, UserInfo } from "../types";
 
 const FriendsPage: React.FC = () => {
   const { token, user: currentUser } = useAuth();
   const navigate = useNavigate();
-  const { initiateCall, state: callState } = useCall();
 
   const [friends, setFriends] = useState<Friend[]>([]);
   const [friendRequests, setFriendRequests] = useState<FriendRequest[]>([]);
@@ -157,8 +156,7 @@ const FriendsPage: React.FC = () => {
     }
     try {
       await requestFriend(targetUser.username, token);
-      await loadData();
-      setSuccess(`${targetUser.username} добавлен в друзья`);
+      setSuccess(`Заявка в друзья для ${targetUser.username} отправлена`);
       setTimeout(() => setSuccess(""), 3000);
       setSearchResults((prev) => prev.filter((foundUser) => foundUser.id !== targetUser.id));
       setSearchQuery("");
@@ -197,11 +195,18 @@ const FriendsPage: React.FC = () => {
     });
   };
 
-  const handleVideoCall = (friend: Friend) => {
-    initiateCall("direct", friend.friend_user_id, friend.username);
-  };
+  const handleVideoCall = async (friend: Friend) => {
+    if (!token) return;
 
-  const canMakeCall = callState.status === "idle" || callState.status === "ended";
+    try {
+      const room = await getOrCreateDirectRoom(friend.friend_user_id, token);
+      navigate(`/room/${encodeURIComponent(room.room_id)}`, {
+        state: { roomName: `Private voice with ${friend.username}` },
+      });
+    } catch (err: any) {
+      setError(err.message || "Failed to open private voice room");
+    }
+  };
 
   return (
     <div className="min-h-screen flex flex-col p-6">
@@ -288,8 +293,7 @@ const FriendsPage: React.FC = () => {
                   variant="secondary"
                   size="sm"
                   onClick={() => handleVideoCall(friend)}
-                  disabled={!canMakeCall}
-                  title={canMakeCall ? "Video call" : "Already in a call"}
+                  title="Open private voice room"
                 >
                   <Video className="h-5 w-5" />
                 </Button>

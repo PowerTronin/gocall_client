@@ -266,11 +266,11 @@ const RoomsPage: React.FC = () => {
                     key={friend.user_id}
                     className="flex justify-between items-center p-2 hover:bg-gray-100 rounded"
                   >
-                    <span>{friend.user_id}</span>
+                    <span>{friend.username}</span>
                     <Button
                       variant="primary"
                       size="sm"
-                      onClick={() => handleConfirmInvite(friend.user_id)}
+                      onClick={() => handleConfirmInvite(friend.username)}
                     >
                       Пригласить
                     </Button>

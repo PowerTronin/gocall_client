@@ -47,7 +47,7 @@ export interface Friend {
   username: string;
   is_online: boolean;
   user_id: string; // kept for route params compatibility
-  friend_user_id: number; // numeric target user id for DM/calls
+  friend_user_id: string; // target user UUID for DM/private room flows
   is_pinned: boolean;
   created_at: string;
 }

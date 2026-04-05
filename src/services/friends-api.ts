@@ -83,10 +83,10 @@ export async function declineFriendRequest(requestId: number, token: string): Pr
 }
 
 export async function requestFriend(friendUsername: string, token: string): Promise<void> {
-  const response = await fetch(`${API_BASE_URL}/friends/add`, {
+  const response = await fetch(`${API_BASE_URL}/friends/request`, {
     method: "POST",
     headers: headers(token),
-    body: JSON.stringify({ friend_username: friendUsername }),
+    body: JSON.stringify({ to_username: friendUsername }),
   });
   if (!response.ok) {
     const errorData = await response.json();
@@ -110,7 +110,7 @@ export async function fetchFriends(token: string): Promise<Friend[]> {
   return friends.map((item) => ({
     id: item.id,
     user_id: item.user_id,
-    friend_user_id: item.id,
+    friend_user_id: item.user_id,
     username: item.username || `user-${item.user_id}`,
     is_online: item.is_online,
     is_pinned: item.is_pinned,
