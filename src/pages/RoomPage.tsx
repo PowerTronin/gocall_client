@@ -193,6 +193,22 @@ export default function RoomPage(): JSX.Element {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  const getRoomDisplayName = useCallback(
+    (rawName: string, membersList: RoomStateResponse["members"]) => {
+      if (!rawName.startsWith("__direct__:")) {
+        return rawName;
+      }
+
+      const otherMember = membersList.find((member) => member.user_id !== user?.user_id);
+      if (otherMember?.username) {
+        return `Private voice with ${otherMember.username}`;
+      }
+
+      return routeRoomName || "Private voice room";
+    },
+    [routeRoomName, user?.user_id]
+  );
+
   const loadRoomState = useCallback(async () => {
     if (!token || !roomIdentifier) return;
 
@@ -245,7 +261,7 @@ export default function RoomPage(): JSX.Element {
     return () => clearInterval(interval);
   }, [loadRoomState, roomIdentifier, token]);
 
-  const roomName = roomState?.room.name || routeRoomName;
+  const roomName = getRoomDisplayName(roomState?.room.name || routeRoomName, roomState?.members ?? []);
   const voiceParticipants = roomState?.voice_participants ?? [];
   const members = roomState?.members ?? [];
   const isCurrentRoomSession =

@@ -15,7 +15,7 @@ import { Room, Friend } from "../types";
 import { useNavigate } from "react-router-dom";
 
 const Index: React.FC = () => {
-  const { token } = useAuth();
+  const { token, user } = useAuth();
   const navigate = useNavigate();
   const [rooms, setRooms] = useState<Room[]>([]);
   const [invitedRooms, setInvitedRooms] = useState<Room[]>([]);
@@ -34,7 +34,10 @@ const Index: React.FC = () => {
         const fetchedFriends = await fetchFriends(token);
 
         // Помечаем, какие комнаты созданы пользователем
-        const markedOwnRooms = ownRooms.map((room) => ({ ...room, is_owner: true }));
+        const markedOwnRooms = ownRooms.map((room) => ({
+          ...room,
+          is_owner: room.user_id === user?.user_id,
+        }));
         const markedInvitedRooms = invited.map((room) => ({ ...room, is_owner: false }));
 
         setRooms(markedOwnRooms);
@@ -45,9 +48,11 @@ const Index: React.FC = () => {
       }
     };
     loadData();
-  }, [token]);
+  }, [token, user?.user_id]);
 
   const allRooms: Room[] = [...rooms, ...invitedRooms];
+  const getRoomDisplayName = (room: Room) =>
+    room.name.startsWith("__direct__:") ? "Private voice room" : room.name;
 
   // Удаление комнаты
   const handleDeleteRoom = async (roomId: string) => {
@@ -155,7 +160,7 @@ const Index: React.FC = () => {
                   }`}
                 >
                   <div className="mb-2">
-                    <h3 className="font-medium">{room.name}</h3>
+                    <h3 className="font-medium">{getRoomDisplayName(room)}</h3>
                   </div>
                   <div className="flex justify-between items-center">
                     <Button

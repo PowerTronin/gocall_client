@@ -15,7 +15,7 @@ import { useNavigate } from "react-router-dom";
 import { Room, Friend } from "../types";
 
 const RoomsPage: React.FC = () => {
-  const { token } = useAuth();
+  const { token, user } = useAuth();
   const navigate = useNavigate();
   // Состояния для комнат, приглашённых комнат, списка друзей
   const [rooms, setRooms] = useState<Room[]>([]);
@@ -41,7 +41,10 @@ const RoomsPage: React.FC = () => {
         const fetchedFriends = await fetchFriends(token);
 
         // Отмечаем комнаты: свои — is_owner = true, приглашённые — false
-        const markedOwnRooms = ownRooms.map((room) => ({ ...room, is_owner: true }));
+        const markedOwnRooms = ownRooms.map((room) => ({
+          ...room,
+          is_owner: room.user_id === user?.user_id,
+        }));
         const markedInvitedRooms = invited.map((room) => ({ ...room, is_owner: false }));
 
         setRooms(markedOwnRooms);
@@ -52,10 +55,12 @@ const RoomsPage: React.FC = () => {
       }
     };
     loadData();
-  }, [token]);
+  }, [token, user?.user_id]);
 
   // Объединяем списки комнат
   const allRooms: Room[] = [...rooms, ...invitedRooms];
+  const getRoomDisplayName = (room: Room) =>
+    room.name.startsWith("__direct__:") ? "Private voice room" : room.name;
 
   // Функция создания новой комнаты
   const handleCreateRoom = async () => {
@@ -189,7 +194,7 @@ const RoomsPage: React.FC = () => {
               }`}
             >
               <div className="mb-2">
-                <h3 className="font-medium">{room.name}</h3>
+                <h3 className="font-medium">{getRoomDisplayName(room)}</h3>
               </div>
               <div className="flex justify-between items-center">
                 <Button
