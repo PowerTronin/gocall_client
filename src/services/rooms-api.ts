@@ -2,6 +2,20 @@ import { RoomInvite, Room } from "../types";
 import { headers } from "./api";
 import { API_BASE_URL } from "./config";
 
+async function getAPIError(response: Response, fallback: string): Promise<string> {
+  const errorData = await response.json().catch(() => ({}));
+  const message =
+    typeof errorData.error === "string" && errorData.error.length > 0
+      ? errorData.error
+      : fallback;
+
+  if (response.status === 401) {
+    return `Session expired: ${message}`;
+  }
+
+  return message;
+}
+
 export interface RoomMemberState {
   id: number;
   user_id: string;
@@ -98,8 +112,7 @@ export async function createRoom(name: string, token: string): Promise<Room> {
     body: JSON.stringify({ name, type }),
   });
   if (!response.ok) {
-    const errorData = await response.json();
-    throw new Error(errorData.error || "Failed to create room");
+    throw new Error(await getAPIError(response, "Failed to create room"));
   }
   const data = await response.json();
   return {
@@ -118,8 +131,7 @@ export async function deleteRoom(roomID: string, token: string): Promise<void> {
     headers: headers(token),
   });
   if (!response.ok) {
-    const errorData = await response.json().catch(() => ({}));
-    throw new Error(errorData.error || "Failed to delete room");
+    throw new Error(await getAPIError(response, "Failed to delete room"));
   }
 }
 
@@ -130,10 +142,9 @@ export async function joinRoomAsMember(roomID: string, token: string): Promise<v
     headers: headers(token),
   });
   if (!response.ok) {
-    // Ignore "already a member" errors
-    const errorData = await response.json();
-    if (!errorData.error?.includes("already")) {
-      throw new Error(errorData.error || "Failed to join room");
+    const message = await getAPIError(response, "Failed to join room");
+    if (!message.toLowerCase().includes("already")) {
+      throw new Error(message);
     }
   }
 }
@@ -144,8 +155,7 @@ export async function fetchRoomState(roomID: string, token: string): Promise<Roo
     headers: headers(token),
   });
   if (!response.ok) {
-    const errorData = await response.json().catch(() => ({}));
-    throw new Error(errorData.error || "Failed to fetch room state");
+    throw new Error(await getAPIError(response, "Failed to fetch room state"));
   }
   return response.json();
 }
@@ -156,8 +166,7 @@ export async function joinRoomVoice(roomID: string, token: string): Promise<void
     headers: headers(token),
   });
   if (!response.ok) {
-    const errorData = await response.json().catch(() => ({}));
-    throw new Error(errorData.error || "Failed to join room voice");
+    throw new Error(await getAPIError(response, "Failed to join room voice"));
   }
 }
 
@@ -167,8 +176,7 @@ export async function leaveRoomVoice(roomID: string, token: string): Promise<voi
     headers: headers(token),
   });
   if (!response.ok) {
-    const errorData = await response.json().catch(() => ({}));
-    throw new Error(errorData.error || "Failed to leave room voice");
+    throw new Error(await getAPIError(response, "Failed to leave room voice"));
   }
 }
 
@@ -187,8 +195,7 @@ export async function updateRoomVoiceMedia(
     body: JSON.stringify(payload),
   });
   if (!response.ok) {
-    const errorData = await response.json().catch(() => ({}));
-    throw new Error(errorData.error || "Failed to update room voice media");
+    throw new Error(await getAPIError(response, "Failed to update room voice media"));
   }
 }
 
@@ -201,8 +208,7 @@ export async function fetchRoomVoiceCredentials(
     headers: headers(token),
   });
   if (!response.ok) {
-    const errorData = await response.json().catch(() => ({}));
-    throw new Error(errorData.error || "Failed to fetch room voice credentials");
+    throw new Error(await getAPIError(response, "Failed to fetch room voice credentials"));
   }
   return response.json();
 }

@@ -1,5 +1,5 @@
 import { FriendRequest, Friend, User } from "../types";
-import { decodeJWT, getUserInfo, headers } from "./api";
+import { getUserInfo, headers } from "./api";
 import { API_BASE_URL } from "./config";
 
 interface FriendResponse {
@@ -103,7 +103,6 @@ export async function fetchFriends(token: string): Promise<Friend[]> {
     throw new Error("Failed to fetch friends");
   }
 
-  const me = decodeJWT(token);
   const data = (await response.json()) as { friends?: FriendResponse[] };
   const friends = data.friends ?? [];
 
@@ -115,7 +114,7 @@ export async function fetchFriends(token: string): Promise<Friend[]> {
     is_online: item.is_online,
     is_pinned: item.is_pinned,
     created_at: item.created_at,
-  })).filter((item) => item.user_id !== me?.user_id);
+  }));
 }
 
 export async function addFriend(friendUsername: string, token: string): Promise<void> {

@@ -7,7 +7,6 @@ export async function fetchDirectChatHistory(
   withUserID: string
 ): Promise<IChatMessageResponse[]> {
   const query = new URLSearchParams({
-    token,
     with_user: withUserID,
   });
 

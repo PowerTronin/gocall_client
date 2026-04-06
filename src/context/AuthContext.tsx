@@ -1,6 +1,6 @@
 import React, { createContext, useContext, useEffect, useState } from "react";
 import { getToken, saveToken, removeToken } from "../adapters/token-adapter";
-import { decodeJWT, getMe } from "../services/api";
+import { getMe } from "../services/api";
 import { User } from "../types";
 
 interface AuthContextType {
@@ -18,15 +18,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [loading, setLoading] = useState(true);
 
   const hydrateUser = async (storedToken: string) => {
-    const userInfo = decodeJWT(storedToken);
-    if (!userInfo) {
-      console.error("Failed to decode token");
-      await removeToken();
-      setTokenState(null);
-      setUser(null);
-      return;
-    }
-
     try {
       const me = await getMe(storedToken);
       setUser(me);

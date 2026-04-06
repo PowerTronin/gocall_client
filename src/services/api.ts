@@ -4,16 +4,19 @@ import { API_BASE_URL } from "./config";
 // Decode JWT token to extract user info (no server call needed)
 export function decodeJWT(token: string): User | null {
   try {
-    const base64Url = token.split('.')[1];
-    const base64 = base64Url.replace(/-/g, '+').replace(/_/g, '/');
+    const base64Url = token.split(".")[1];
+    if (!base64Url) {
+      return null;
+    }
+    const base64 = base64Url.replace(/-/g, "+").replace(/_/g, "/");
     const payload = JSON.parse(atob(base64));
 
     return {
       id: payload.user_id,
       user_id: String(payload.user_id),
-      username: payload.username,
-      name: payload.username,
-      email: '',
+      username: payload.username ?? "",
+      name: payload.name ?? payload.username ?? "",
+      email: "",
       is_online: true,
       created_at: new Date().toISOString(),
     };
@@ -105,11 +108,22 @@ export async function register(username: string, password: string): Promise<stri
 }
 
 export async function getUserID(token: string): Promise<string> {
-  const user = decodeJWT(token);
-  if (!user) {
-    throw new Error("Invalid token");
+  const response = await fetch(`${API_BASE_URL}/user/id`, {
+    method: "GET",
+    headers: headers(token),
+  });
+
+  if (!response.ok) {
+    const errorData = await response.json().catch(() => ({}));
+    throw new Error(errorData.error || "Failed to fetch current user ID");
   }
-  return String(user.id);
+
+  const payload = (await response.json()) as { userID?: string };
+  if (!payload.userID) {
+    throw new Error("Current user ID is missing in response");
+  }
+
+  return payload.userID;
 }
 
 // Backward-compatible fallback for legacy UI code.
