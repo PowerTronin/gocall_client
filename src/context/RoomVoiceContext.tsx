@@ -65,9 +65,13 @@ const RoomVoiceContext = createContext<RoomVoiceContextValue | undefined>(undefi
 export const RoomVoiceProvider: React.FC<{ children: React.ReactNode }> = ({
   children,
 }) => {
-  const { token } = useAuth();
+  const { token, logout } = useAuth();
   const clientRef = useRef<LiveKitClient | null>(null);
   const [state, setState] = useState<RoomVoiceState>(initialState);
+
+  const isSessionError = useCallback((message: string) => {
+    return message.startsWith("Session expired:") || message === "Not authenticated";
+  }, []);
 
   const syncParticipants = useCallback(() => {
     const participants = clientRef.current?.getAllParticipants() ?? [];
@@ -92,6 +96,19 @@ export const RoomVoiceProvider: React.FC<{ children: React.ReactNode }> = ({
     });
   }, []);
 
+  const handleSessionFailure = useCallback(
+    async (message: string) => {
+      try {
+        await clientRef.current?.disconnect();
+      } catch {
+        // Best-effort disconnect for stale sessions.
+      }
+      resetState(message);
+      logout();
+    },
+    [logout, resetState]
+  );
+
   const leaveRoomVoiceSession = useCallback(async (roomIdOverride?: string) => {
     const roomId = roomIdOverride ?? state.roomId;
     const client = clientRef.current;
@@ -112,8 +129,13 @@ export const RoomVoiceProvider: React.FC<{ children: React.ReactNode }> = ({
       }
     }
 
+    if (leaveError && isSessionError(leaveError)) {
+      await handleSessionFailure(leaveError);
+      return;
+    }
+
     resetState(leaveError);
-  }, [resetState, state.roomId, token]);
+  }, [handleSessionFailure, isSessionError, resetState, state.roomId, token]);
 
   const joinRoomVoiceSession = useCallback(
     async (roomId: string, roomName?: string) => {
@@ -204,10 +226,15 @@ export const RoomVoiceProvider: React.FC<{ children: React.ReactNode }> = ({
         } catch {
           // Best-effort cleanup for partially created room voice presence.
         }
+
+        if (isSessionError(message)) {
+          await handleSessionFailure(message);
+          return;
+        }
         resetState(message);
       }
     },
-    [leaveRoomVoiceSession, resetState, state.roomId, syncParticipants, token]
+    [handleSessionFailure, isSessionError, leaveRoomVoiceSession, resetState, state.roomId, syncParticipants, token]
   );
 
   const syncMediaState = useCallback(
@@ -238,9 +265,13 @@ export const RoomVoiceProvider: React.FC<{ children: React.ReactNode }> = ({
     } catch (error) {
       const message =
         error instanceof Error ? error.message : "Failed to toggle microphone";
+      if (isSessionError(message)) {
+        await handleSessionFailure(message);
+        return;
+      }
       setState((current) => ({ ...current, error: message }));
     }
-  }, [state.status, syncMediaState, syncParticipants]);
+  }, [handleSessionFailure, isSessionError, state.status, syncMediaState, syncParticipants]);
 
   const toggleRoomVoiceCamera = useCallback(async () => {
     if (!clientRef.current || state.status !== "active") {
@@ -255,9 +286,13 @@ export const RoomVoiceProvider: React.FC<{ children: React.ReactNode }> = ({
     } catch (error) {
       const message =
         error instanceof Error ? error.message : "Failed to toggle camera";
+      if (isSessionError(message)) {
+        await handleSessionFailure(message);
+        return;
+      }
       setState((current) => ({ ...current, error: message }));
     }
-  }, [state.status, syncMediaState, syncParticipants]);
+  }, [handleSessionFailure, isSessionError, state.status, syncMediaState, syncParticipants]);
 
   const toggleRoomVoiceScreenShare = useCallback(async () => {
     if (!clientRef.current || state.status !== "active") {
@@ -272,9 +307,13 @@ export const RoomVoiceProvider: React.FC<{ children: React.ReactNode }> = ({
     } catch (error) {
       const message =
         error instanceof Error ? error.message : "Failed to toggle screen share";
+      if (isSessionError(message)) {
+        await handleSessionFailure(message);
+        return;
+      }
       setState((current) => ({ ...current, error: message }));
     }
-  }, [state.status, syncMediaState, syncParticipants]);
+  }, [handleSessionFailure, isSessionError, state.status, syncMediaState, syncParticipants]);
 
   const clearRoomVoiceError = useCallback(() => {
     setState((current) => ({ ...current, error: null }));
