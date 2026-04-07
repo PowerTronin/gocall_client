@@ -57,6 +57,7 @@ interface RoomVoiceContextValue {
   toggleRoomVoiceScreenShare: () => Promise<void>;
   clearRoomVoiceError: () => void;
   getLocalVideoTrack: () => Track | null;
+  getLocalScreenShareTrack: () => Track | null;
   getParticipants: () => ParticipantInfo[];
   livekitClient: LiveKitClient | null;
 }
@@ -326,6 +327,10 @@ export const RoomVoiceProvider: React.FC<{ children: React.ReactNode }> = ({
     return clientRef.current?.getLocalVideoTrack() ?? null;
   }, []);
 
+  const getLocalScreenShareTrack = useCallback(() => {
+    return clientRef.current?.getScreenShareTrack() ?? null;
+  }, []);
+
   const getParticipants = useCallback(() => {
     return clientRef.current?.getAllParticipants() ?? [];
   }, []);
@@ -340,12 +345,14 @@ export const RoomVoiceProvider: React.FC<{ children: React.ReactNode }> = ({
       toggleRoomVoiceScreenShare,
       clearRoomVoiceError,
       getLocalVideoTrack,
+      getLocalScreenShareTrack,
       getParticipants,
       livekitClient: clientRef.current,
     }),
     [
       clearRoomVoiceError,
       getLocalVideoTrack,
+      getLocalScreenShareTrack,
       getParticipants,
       joinRoomVoiceSession,
       leaveRoomVoiceSession,

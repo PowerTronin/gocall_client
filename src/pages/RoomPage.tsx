@@ -66,46 +66,33 @@ const ControlButton: React.FC<ControlButtonProps> = ({
 const VoiceTile: React.FC<{
   participant: RoomVoiceParticipantState;
   isCurrentUser: boolean;
-  videoTrack?: Track;
+  cameraTrack?: Track;
   audioTrack?: Track;
   isCameraOff?: boolean;
-}> = ({ participant, isCurrentUser, videoTrack, audioTrack, isCameraOff = true }) => {
+}> = ({ participant, isCurrentUser, cameraTrack, audioTrack, isCameraOff = true }) => {
   const initials = (participant.name || participant.username || "?").slice(0, 1).toUpperCase();
   const videoRef = useRef<HTMLVideoElement>(null);
   const audioRef = useRef<HTMLAudioElement>(null);
-  const hasVideoTrack = Boolean(videoTrack);
-  const showVideo = participant.is_screen_sharing || (hasVideoTrack && !isCameraOff);
+  const hasVideoTrack = Boolean(cameraTrack);
+  const showVideo = hasVideoTrack && !isCameraOff;
   const statusLabel = participant.is_screen_sharing
-    ? "Screen sharing"
+    ? "Sharing screen"
     : showVideo
       ? "Camera on"
       : "Voice only";
 
   useEffect(() => {
-    if (!videoRef.current || !videoTrack || participant.is_screen_sharing) {
+    if (!videoRef.current || !cameraTrack || !showVideo) {
       return undefined;
     }
 
-    const track = videoTrack as VideoTrack;
+    const track = cameraTrack as VideoTrack;
     track.attach(videoRef.current);
 
     return () => {
       track.detach(videoRef.current!);
     };
-  }, [participant.is_screen_sharing, videoTrack]);
-
-  useEffect(() => {
-    if (!videoRef.current || !videoTrack || !participant.is_screen_sharing) {
-      return undefined;
-    }
-
-    const track = videoTrack as VideoTrack;
-    track.attach(videoRef.current);
-
-    return () => {
-      track.detach(videoRef.current!);
-    };
-  }, [participant.is_screen_sharing, videoTrack]);
+  }, [cameraTrack, showVideo]);
 
   useEffect(() => {
     if (isCurrentUser || !audioRef.current || !audioTrack) {
@@ -170,6 +157,52 @@ const VoiceTile: React.FC<{
   );
 };
 
+const ScreenShareTile: React.FC<{
+  participant: RoomVoiceParticipantState;
+  screenShareTrack?: Track;
+}> = ({ participant, screenShareTrack }) => {
+  const videoRef = useRef<HTMLVideoElement>(null);
+
+  useEffect(() => {
+    if (!videoRef.current || !screenShareTrack) {
+      return undefined;
+    }
+
+    const track = screenShareTrack as VideoTrack;
+    track.attach(videoRef.current);
+
+    return () => {
+      track.detach(videoRef.current!);
+    };
+  }, [screenShareTrack]);
+
+  if (!screenShareTrack) {
+    return null;
+  }
+
+  return (
+    <div className="relative rounded-xl overflow-hidden bg-gray-950 aspect-video shadow-lg ring-1 ring-blue-400/40">
+      <video
+        ref={videoRef}
+        autoPlay
+        playsInline
+        muted
+        className="w-full h-full object-contain bg-black"
+      />
+
+      <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/80 to-transparent p-3">
+        <div className="flex items-center justify-between">
+          <div className="text-white">
+            <div className="font-medium">{participant.username} is sharing</div>
+            <div className="text-xs text-white/70">Screen share</div>
+          </div>
+          <Monitor className="w-4 h-4 text-blue-300" />
+        </div>
+      </div>
+    </div>
+  );
+};
+
 export default function RoomPage(): JSX.Element {
   const { roomID } = useParams();
   const navigate = useNavigate();
@@ -184,6 +217,7 @@ export default function RoomPage(): JSX.Element {
     toggleRoomVoiceScreenShare,
     clearRoomVoiceError,
     getLocalVideoTrack,
+    getLocalScreenShareTrack,
   } = useRoomVoice();
 
   const routeRoomName =
@@ -278,9 +312,56 @@ export default function RoomPage(): JSX.Element {
     [roomVoiceState.participants]
   );
   const localVideoTrack = getLocalVideoTrack();
+  const localScreenShareTrack = getLocalScreenShareTrack();
   const myVoiceState = useMemo(
     () => voiceParticipants.find((participant) => participant.user_id === user?.user_id) ?? null,
     [voiceParticipants, user?.user_id]
+  );
+  const displayedVoiceParticipants = voiceParticipants.length > 0
+    ? voiceParticipants
+    : isCurrentRoomSession && user
+      ? [{
+          id: user.id,
+          user_id: user.user_id,
+          username: user.username,
+          name: user.name,
+          is_online: user.is_online,
+          is_mic_enabled: !roomVoiceState.localMuted,
+          is_camera_enabled: !roomVoiceState.localCameraOff,
+          is_screen_sharing: roomVoiceState.screenSharing,
+          joined_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+        }]
+      : [];
+
+  const screenShareTiles = useMemo(
+    () =>
+      displayedVoiceParticipants
+        .map((participant) => {
+          const liveParticipant = liveParticipantsByUserId.get(participant.user_id);
+          const screenShareTrack =
+            participant.user_id === user?.user_id
+              ? localScreenShareTrack ?? liveParticipant?.screenShareTrack
+              : liveParticipant?.screenShareTrack;
+
+          if (!screenShareTrack) {
+            return null;
+          }
+
+          return {
+            participant,
+            screenShareTrack,
+          };
+        })
+        .filter(
+          (
+            tile
+          ): tile is {
+            participant: RoomVoiceParticipantState;
+            screenShareTrack: Track;
+          } => tile !== null
+        ),
+    [displayedVoiceParticipants, liveParticipantsByUserId, localScreenShareTrack, user?.user_id]
   );
 
   const canToggleMedia = isCurrentRoomSession && roomVoiceState.status === "active" && !isSubmitting;
@@ -358,30 +439,13 @@ export default function RoomPage(): JSX.Element {
   }, [clearRoomVoiceError, roomVoiceState.error]);
 
   const getGridClass = () => {
-    const count = Math.max(displayedVoiceParticipants.length, 1);
+    const count = Math.max(displayedVoiceParticipants.length + screenShareTiles.length, 1);
     if (count <= 1) return "grid-cols-1";
     if (count === 2) return "grid-cols-2";
     if (count <= 4) return "grid-cols-2";
     if (count <= 6) return "grid-cols-3";
     return "grid-cols-4";
   };
-
-  const displayedVoiceParticipants = voiceParticipants.length > 0
-    ? voiceParticipants
-    : isCurrentRoomSession && user
-      ? [{
-          id: user.id,
-          user_id: user.user_id,
-          username: user.username,
-          name: user.name,
-          is_online: user.is_online,
-          is_mic_enabled: !roomVoiceState.localMuted,
-          is_camera_enabled: !roomVoiceState.localCameraOff,
-          is_screen_sharing: roomVoiceState.screenSharing,
-          joined_at: new Date().toISOString(),
-          updated_at: new Date().toISOString(),
-        }]
-      : [];
 
   if (isLoading) {
     return (
@@ -487,12 +551,19 @@ export default function RoomPage(): JSX.Element {
                     participant={participant}
                     isCurrentUser={participant.user_id === user?.user_id}
                     isCameraOff={liveParticipantsByUserId.get(participant.user_id)?.isCameraOff}
-                    videoTrack={
+                    cameraTrack={
                       participant.user_id === user?.user_id
-                        ? localVideoTrack ?? liveParticipantsByUserId.get(participant.user_id)?.videoTrack
-                        : liveParticipantsByUserId.get(participant.user_id)?.videoTrack
+                        ? localVideoTrack ?? liveParticipantsByUserId.get(participant.user_id)?.cameraTrack
+                        : liveParticipantsByUserId.get(participant.user_id)?.cameraTrack
                     }
                     audioTrack={liveParticipantsByUserId.get(participant.user_id)?.audioTrack}
+                  />
+                ))}
+                {screenShareTiles.map(({ participant, screenShareTrack }) => (
+                  <ScreenShareTile
+                    key={`${participant.user_id}-screen-share`}
+                    participant={participant}
+                    screenShareTrack={screenShareTrack}
                   />
                 ))}
               </div>

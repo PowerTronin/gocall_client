@@ -39,10 +39,12 @@ export interface ParticipantInfo {
   identity: string;
   name: string;
   isLocal: boolean;
-  videoTrack?: Track;
+  cameraTrack?: Track;
+  screenShareTrack?: Track;
   audioTrack?: Track;
   isMuted: boolean;
   isCameraOff: boolean;
+  isScreenSharing: boolean;
 }
 
 export type LiveKitConnectionState = 'disconnected' | 'connecting' | 'connected' | 'reconnecting';
@@ -266,8 +268,6 @@ export class LiveKitClient {
     const cameraPublication = participant.getTrackPublication(Track.Source.Camera);
     const screenShareTrack = screenSharePublication?.track;
     const cameraTrack = cameraPublication?.track;
-    const videoTrack = screenShareTrack || cameraTrack;
-    const videoPublication = screenShareTrack ? screenSharePublication : cameraPublication;
     const audioTrack = participant.getTrackPublication(Track.Source.Microphone)?.track;
 
     return {
@@ -275,10 +275,12 @@ export class LiveKitClient {
       identity: participant.identity,
       name: participant.name || participant.identity,
       isLocal,
-      videoTrack: videoTrack || undefined,
+      cameraTrack: cameraTrack || undefined,
+      screenShareTrack: screenShareTrack || undefined,
       audioTrack: audioTrack || undefined,
       isMuted: participant.getTrackPublication(Track.Source.Microphone)?.isMuted ?? true,
-      isCameraOff: videoPublication?.isMuted ?? true,
+      isCameraOff: cameraPublication?.isMuted ?? true,
+      isScreenSharing: !(screenSharePublication?.isMuted ?? true) && Boolean(screenShareTrack),
     };
   }
 
@@ -461,15 +463,13 @@ export class LiveKitClient {
 
   getLocalVideoTrack(): LocalVideoTrack | null {
     if (!this.room) {
-      return this.screenShareTrack || this.localVideoTrack;
+      return this.localVideoTrack;
     }
 
-    const screenTrack = this.room.localParticipant.getTrackPublication(Track.Source.ScreenShare)
-      ?.track as LocalVideoTrack | undefined;
     const cameraTrack = this.room.localParticipant.getTrackPublication(Track.Source.Camera)
       ?.track as LocalVideoTrack | undefined;
 
-    return screenTrack || cameraTrack || this.screenShareTrack || this.localVideoTrack;
+    return cameraTrack || this.localVideoTrack;
   }
 
   getLocalAudioTrack(): LocalAudioTrack | null {
@@ -477,7 +477,14 @@ export class LiveKitClient {
   }
 
   getScreenShareTrack(): LocalVideoTrack | null {
-    return this.screenShareTrack;
+    if (!this.room) {
+      return this.screenShareTrack;
+    }
+
+    const screenTrack = this.room.localParticipant.getTrackPublication(Track.Source.ScreenShare)
+      ?.track as LocalVideoTrack | undefined;
+
+    return screenTrack || this.screenShareTrack;
   }
 
   isMicEnabled(): boolean {
