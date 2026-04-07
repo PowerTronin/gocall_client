@@ -14,6 +14,7 @@ import {
   LiveKitClient,
   ParticipantInfo,
 } from "../services/livekit";
+import { Track } from "livekit-client";
 import {
   fetchRoomVoiceCredentials,
   joinRoomVoice,
@@ -55,7 +56,7 @@ interface RoomVoiceContextValue {
   toggleRoomVoiceCamera: () => Promise<void>;
   toggleRoomVoiceScreenShare: () => Promise<void>;
   clearRoomVoiceError: () => void;
-  getLocalVideoTrack: () => MediaStreamTrack | null;
+  getLocalVideoTrack: () => Track | null;
   getParticipants: () => ParticipantInfo[];
   livekitClient: LiveKitClient | null;
 }
@@ -188,6 +189,8 @@ export const RoomVoiceProvider: React.FC<{ children: React.ReactNode }> = ({
           },
           onParticipantConnected: syncParticipants,
           onParticipantDisconnected: syncParticipants,
+          onLocalTrackPublished: syncParticipants,
+          onLocalTrackUnpublished: syncParticipants,
           onTrackSubscribed: syncParticipants,
           onTrackUnsubscribed: syncParticipants,
           onTrackMuted: syncParticipants,
@@ -320,8 +323,7 @@ export const RoomVoiceProvider: React.FC<{ children: React.ReactNode }> = ({
   }, []);
 
   const getLocalVideoTrack = useCallback(() => {
-    const track = clientRef.current?.getLocalVideoTrack();
-    return track?.mediaStreamTrack ?? null;
+    return clientRef.current?.getLocalVideoTrack() ?? null;
   }, []);
 
   const getParticipants = useCallback(() => {

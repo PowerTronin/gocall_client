@@ -55,9 +55,9 @@ const RoomVoiceDock: React.FC = () => {
             title={state.localMuted ? "Unmute" : "Mute"}
           >
             {state.localMuted ? (
-              <MicOff className="w-4 h-4 text-red-400" />
-            ) : (
               <Mic className="w-4 h-4 text-white" />
+            ) : (
+              <MicOff className="w-4 h-4 text-red-400" />
             )}
           </button>
 
@@ -69,9 +69,9 @@ const RoomVoiceDock: React.FC = () => {
             title={state.localCameraOff ? "Turn on camera" : "Turn off camera"}
           >
             {state.localCameraOff ? (
-              <VideoOff className="w-4 h-4 text-red-400" />
-            ) : (
               <Video className="w-4 h-4 text-white" />
+            ) : (
+              <VideoOff className="w-4 h-4 text-red-400" />
             )}
           </button>
 

@@ -68,10 +68,18 @@ const VoiceTile: React.FC<{
   isCurrentUser: boolean;
   videoTrack?: Track;
   audioTrack?: Track;
-}> = ({ participant, isCurrentUser, videoTrack, audioTrack }) => {
+  isCameraOff?: boolean;
+}> = ({ participant, isCurrentUser, videoTrack, audioTrack, isCameraOff = true }) => {
   const initials = (participant.name || participant.username || "?").slice(0, 1).toUpperCase();
   const videoRef = useRef<HTMLVideoElement>(null);
   const audioRef = useRef<HTMLAudioElement>(null);
+  const hasVideoTrack = Boolean(videoTrack);
+  const showVideo = participant.is_screen_sharing || (hasVideoTrack && !isCameraOff);
+  const statusLabel = participant.is_screen_sharing
+    ? "Screen sharing"
+    : showVideo
+      ? "Camera on"
+      : "Voice only";
 
   useEffect(() => {
     if (!videoRef.current || !videoTrack || participant.is_screen_sharing) {
@@ -115,7 +123,7 @@ const VoiceTile: React.FC<{
   return (
     <div className="relative rounded-xl overflow-hidden bg-gray-800 aspect-video shadow-lg">
       {!isCurrentUser && <audio ref={audioRef} autoPlay playsInline />}
-      {videoTrack && (participant.is_camera_enabled || participant.is_screen_sharing) ? (
+      {showVideo ? (
         <video
           ref={videoRef}
           autoPlay
@@ -135,13 +143,7 @@ const VoiceTile: React.FC<{
         <div className="flex items-center justify-between">
           <div className="text-white">
             <div className="font-medium">{isCurrentUser ? "You" : participant.username}</div>
-            <div className="text-xs text-white/70">
-              {participant.is_screen_sharing
-                ? "Screen sharing"
-                : participant.is_camera_enabled
-                  ? "Camera on"
-                  : "Voice only"}
-            </div>
+            <div className="text-xs text-white/70">{statusLabel}</div>
           </div>
           <div className="flex items-center gap-2">
             {participant.is_mic_enabled ? (
@@ -149,10 +151,10 @@ const VoiceTile: React.FC<{
             ) : (
               <MicOff className="w-4 h-4 text-red-400" />
             )}
-            {participant.is_camera_enabled ? (
+            {showVideo ? (
               <Video className="w-4 h-4 text-green-300" />
             ) : (
-              <VideoOff className="w-4 h-4 text-white/50" />
+              <VideoOff className="w-4 h-4 text-red-400" />
             )}
             {participant.is_screen_sharing && <Monitor className="w-4 h-4 text-blue-300" />}
           </div>
@@ -181,6 +183,7 @@ export default function RoomPage(): JSX.Element {
     toggleRoomVoiceCamera,
     toggleRoomVoiceScreenShare,
     clearRoomVoiceError,
+    getLocalVideoTrack,
   } = useRoomVoice();
 
   const routeRoomName =
@@ -274,6 +277,7 @@ export default function RoomPage(): JSX.Element {
       ),
     [roomVoiceState.participants]
   );
+  const localVideoTrack = getLocalVideoTrack();
   const myVoiceState = useMemo(
     () => voiceParticipants.find((participant) => participant.user_id === user?.user_id) ?? null,
     [voiceParticipants, user?.user_id]
@@ -482,7 +486,12 @@ export default function RoomPage(): JSX.Element {
                     key={participant.user_id}
                     participant={participant}
                     isCurrentUser={participant.user_id === user?.user_id}
-                    videoTrack={liveParticipantsByUserId.get(participant.user_id)?.videoTrack}
+                    isCameraOff={liveParticipantsByUserId.get(participant.user_id)?.isCameraOff}
+                    videoTrack={
+                      participant.user_id === user?.user_id
+                        ? localVideoTrack ?? liveParticipantsByUserId.get(participant.user_id)?.videoTrack
+                        : liveParticipantsByUserId.get(participant.user_id)?.videoTrack
+                    }
                     audioTrack={liveParticipantsByUserId.get(participant.user_id)?.audioTrack}
                   />
                 ))}
@@ -519,8 +528,8 @@ export default function RoomPage(): JSX.Element {
             className="flex items-center justify-center gap-4 p-4 bg-gray-800 border-t border-gray-700"
           >
             <ControlButton
-              icon={<Mic className="w-5 h-5 text-white" />}
-              activeIcon={<MicOff className="w-5 h-5 text-red-400" />}
+              icon={<MicOff className="w-5 h-5 text-red-400" />}
+              activeIcon={<Mic className="w-5 h-5 text-white" />}
               isActive={isCurrentRoomSession ? roomVoiceState.localMuted : !myVoiceState?.is_mic_enabled}
               disabled={!canToggleMedia}
               onClick={() => void handleToggleMic()}
@@ -528,8 +537,8 @@ export default function RoomPage(): JSX.Element {
             />
 
             <ControlButton
-              icon={<Video className="w-5 h-5 text-white" />}
-              activeIcon={<VideoOff className="w-5 h-5 text-red-400" />}
+              icon={<VideoOff className="w-5 h-5 text-red-400" />}
+              activeIcon={<Video className="w-5 h-5 text-white" />}
               isActive={isCurrentRoomSession ? roomVoiceState.localCameraOff : !myVoiceState?.is_camera_enabled}
               disabled={!canToggleMedia}
               onClick={() => void handleToggleCamera()}
@@ -541,9 +550,9 @@ export default function RoomPage(): JSX.Element {
             />
 
             <ControlButton
-              icon={<Monitor className="w-5 h-5 text-white" />}
-              activeIcon={<MonitorOff className="w-5 h-5 text-red-400" />}
-              isActive={isCurrentRoomSession ? roomVoiceState.screenSharing : Boolean(myVoiceState?.is_screen_sharing)}
+              icon={<MonitorOff className="w-5 h-5 text-red-400" />}
+              activeIcon={<Monitor className="w-5 h-5 text-white" />}
+              isActive={!(isCurrentRoomSession ? roomVoiceState.screenSharing : Boolean(myVoiceState?.is_screen_sharing))}
               disabled={!canToggleMedia}
               onClick={() => void handleToggleScreenShare()}
               label={
