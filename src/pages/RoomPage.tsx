@@ -2,8 +2,10 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
 import {
   ArrowLeft,
+  Maximize2,
   Mic,
   MicOff,
+  Minimize2,
   Monitor,
   MonitorOff,
   Users,
@@ -34,6 +36,23 @@ interface ControlButtonProps {
   label: string;
 }
 
+interface TileActionButtonProps {
+  label: string;
+  onClick: () => void;
+  icon?: React.ReactNode;
+}
+
+interface VisualTile {
+  id: string;
+  kind: "camera" | "screen-share";
+  participant: RoomVoiceParticipantState;
+  track: Track;
+}
+
+const getFullscreenToggleError = (error: unknown): string => {
+  return error instanceof Error ? error.message : "Failed to toggle fullscreen";
+};
+
 const ControlButton: React.FC<ControlButtonProps> = ({
   icon,
   activeIcon,
@@ -63,16 +82,55 @@ const ControlButton: React.FC<ControlButtonProps> = ({
   );
 };
 
+const TileActionButton: React.FC<TileActionButtonProps> = ({ label, onClick, icon }) => {
+  return (
+    <button
+      type="button"
+      onClick={(event) => {
+        event.stopPropagation();
+        onClick();
+      }}
+      className="inline-flex items-center gap-1 rounded-md bg-black/55 px-2 py-1 text-xs font-medium text-white transition-colors hover:bg-black/75"
+      title={label}
+    >
+      {icon}
+      <span>{label}</span>
+    </button>
+  );
+};
+
 const VoiceTile: React.FC<{
   participant: RoomVoiceParticipantState;
   isCurrentUser: boolean;
   cameraTrack?: Track;
   audioTrack?: Track;
   isCameraOff?: boolean;
-}> = ({ participant, isCurrentUser, cameraTrack, audioTrack, isCameraOff = true }) => {
+  className?: string;
+  isFocused?: boolean;
+  canFocus?: boolean;
+  canFullscreen?: boolean;
+  onFocusToggle?: () => void;
+  onFullscreenError?: (message: string) => void;
+  onSelect?: () => void;
+}> = ({
+  participant,
+  isCurrentUser,
+  cameraTrack,
+  audioTrack,
+  isCameraOff = true,
+  className,
+  isFocused = false,
+  canFocus = false,
+  canFullscreen = false,
+  onFocusToggle,
+  onFullscreenError,
+  onSelect,
+}) => {
   const initials = (participant.name || participant.username || "?").slice(0, 1).toUpperCase();
+  const containerRef = useRef<HTMLDivElement>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
   const audioRef = useRef<HTMLAudioElement>(null);
+  const [isFullscreen, setIsFullscreen] = useState(false);
   const hasVideoTrack = Boolean(cameraTrack);
   const showVideo = hasVideoTrack && !isCameraOff;
   const statusLabel = participant.is_screen_sharing
@@ -107,8 +165,50 @@ const VoiceTile: React.FC<{
     };
   }, [audioTrack, isCurrentUser]);
 
+  useEffect(() => {
+    const handleFullscreenChange = () => {
+      setIsFullscreen(document.fullscreenElement === containerRef.current);
+    };
+
+    document.addEventListener("fullscreenchange", handleFullscreenChange);
+    return () => document.removeEventListener("fullscreenchange", handleFullscreenChange);
+  }, []);
+
+  const handleFullscreen = useCallback(async () => {
+    if (!containerRef.current) {
+      return;
+    }
+
+    try {
+      if (document.fullscreenElement === containerRef.current) {
+        if (!document.exitFullscreen) {
+          onFullscreenError?.("Fullscreen exit is not available in this browser");
+          return;
+        }
+        await document.exitFullscreen();
+        return;
+      }
+
+      const requestFullscreen = containerRef.current.requestFullscreen?.bind(containerRef.current);
+      if (!requestFullscreen) {
+        onFullscreenError?.("Fullscreen is not available in this browser");
+        return;
+      }
+
+      await requestFullscreen();
+    } catch (error) {
+      onFullscreenError?.(getFullscreenToggleError(error));
+    }
+  }, [onFullscreenError]);
+
   return (
-    <div className="relative rounded-xl overflow-hidden bg-gray-800 aspect-video shadow-lg">
+    <div
+      ref={containerRef}
+      onClick={onSelect}
+      className={`relative overflow-hidden rounded-xl bg-gray-800 shadow-lg ${
+        className ?? "aspect-video"
+      } ${onSelect ? "cursor-pointer" : ""}`}
+    >
       {!isCurrentUser && <audio ref={audioRef} autoPlay playsInline />}
       {showVideo ? (
         <video
@@ -123,6 +223,31 @@ const VoiceTile: React.FC<{
           <div className="w-16 h-16 rounded-full bg-primary/30 flex items-center justify-center">
             <span className="text-2xl font-bold text-white">{initials}</span>
           </div>
+        </div>
+      )}
+
+      {showVideo && (canFocus || canFullscreen) && (
+        <div className="absolute left-3 top-3 z-10 flex items-center gap-2">
+          {canFocus && onFocusToggle && (
+            <TileActionButton
+              label={isFocused ? "Exit focus" : "Expand"}
+              onClick={onFocusToggle}
+              icon={isFocused ? <Minimize2 className="h-3.5 w-3.5" /> : <Maximize2 className="h-3.5 w-3.5" />}
+            />
+          )}
+          {canFullscreen && (
+            <TileActionButton
+              label={isFullscreen ? "Exit fullscreen" : "Fullscreen"}
+              onClick={() => void handleFullscreen()}
+              icon={
+                isFullscreen ? (
+                  <Minimize2 className="h-3.5 w-3.5" />
+                ) : (
+                  <Maximize2 className="h-3.5 w-3.5" />
+                )
+              }
+            />
+          )}
         </div>
       )}
 
@@ -160,8 +285,27 @@ const VoiceTile: React.FC<{
 const ScreenShareTile: React.FC<{
   participant: RoomVoiceParticipantState;
   screenShareTrack?: Track;
-}> = ({ participant, screenShareTrack }) => {
+  className?: string;
+  isFocused?: boolean;
+  canFocus?: boolean;
+  canFullscreen?: boolean;
+  onFocusToggle?: () => void;
+  onFullscreenError?: (message: string) => void;
+  onSelect?: () => void;
+}> = ({
+  participant,
+  screenShareTrack,
+  className,
+  isFocused = false,
+  canFocus = true,
+  canFullscreen = true,
+  onFocusToggle,
+  onFullscreenError,
+  onSelect,
+}) => {
+  const containerRef = useRef<HTMLDivElement>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
+  const [isFullscreen, setIsFullscreen] = useState(false);
 
   useEffect(() => {
     if (!videoRef.current || !screenShareTrack) {
@@ -176,12 +320,54 @@ const ScreenShareTile: React.FC<{
     };
   }, [screenShareTrack]);
 
+  useEffect(() => {
+    const handleFullscreenChange = () => {
+      setIsFullscreen(document.fullscreenElement === containerRef.current);
+    };
+
+    document.addEventListener("fullscreenchange", handleFullscreenChange);
+    return () => document.removeEventListener("fullscreenchange", handleFullscreenChange);
+  }, []);
+
   if (!screenShareTrack) {
     return null;
   }
 
+  const handleFullscreen = async () => {
+    if (!containerRef.current) {
+      return;
+    }
+
+    try {
+      if (document.fullscreenElement === containerRef.current) {
+        if (!document.exitFullscreen) {
+          onFullscreenError?.("Fullscreen exit is not available in this browser");
+          return;
+        }
+        await document.exitFullscreen();
+        return;
+      }
+
+      const requestFullscreen = containerRef.current.requestFullscreen?.bind(containerRef.current);
+      if (!requestFullscreen) {
+        onFullscreenError?.("Fullscreen is not available in this browser");
+        return;
+      }
+
+      await requestFullscreen();
+    } catch (error) {
+      onFullscreenError?.(getFullscreenToggleError(error));
+    }
+  };
+
   return (
-    <div className="relative rounded-xl overflow-hidden bg-gray-950 aspect-video shadow-lg ring-1 ring-blue-400/40">
+    <div
+      ref={containerRef}
+      onClick={onSelect}
+      className={`relative overflow-hidden rounded-xl bg-gray-950 shadow-lg ring-1 ring-blue-400/40 ${
+        className ?? "aspect-video"
+      } ${onSelect ? "cursor-pointer" : ""}`}
+    >
       <video
         ref={videoRef}
         autoPlay
@@ -189,6 +375,31 @@ const ScreenShareTile: React.FC<{
         muted
         className="w-full h-full object-contain bg-black"
       />
+
+      {(canFocus || canFullscreen) && (
+        <div className="absolute left-3 top-3 z-10 flex items-center gap-2">
+          {canFocus && onFocusToggle && (
+            <TileActionButton
+              label={isFocused ? "Exit focus" : "Expand"}
+              onClick={onFocusToggle}
+              icon={isFocused ? <Minimize2 className="h-3.5 w-3.5" /> : <Maximize2 className="h-3.5 w-3.5" />}
+            />
+          )}
+          {canFullscreen && (
+            <TileActionButton
+              label={isFullscreen ? "Exit fullscreen" : "Fullscreen"}
+              onClick={() => void handleFullscreen()}
+              icon={
+                isFullscreen ? (
+                  <Minimize2 className="h-3.5 w-3.5" />
+                ) : (
+                  <Maximize2 className="h-3.5 w-3.5" />
+                )
+              }
+            />
+          )}
+        </div>
+      )}
 
       <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/80 to-transparent p-3">
         <div className="flex items-center justify-between">
@@ -229,6 +440,7 @@ export default function RoomPage(): JSX.Element {
   const [isLoading, setIsLoading] = useState(true);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [focusedTileId, setFocusedTileId] = useState<string | null>(null);
 
   const getRoomDisplayName = useCallback(
     (rawName: string, membersList: RoomStateResponse["members"]) => {
@@ -363,8 +575,66 @@ export default function RoomPage(): JSX.Element {
         ),
     [displayedVoiceParticipants, liveParticipantsByUserId, localScreenShareTrack, user?.user_id]
   );
+  const visualTiles = useMemo<VisualTile[]>(
+    () => [
+      ...displayedVoiceParticipants.flatMap((participant) => {
+        const liveParticipant = liveParticipantsByUserId.get(participant.user_id);
+        const cameraTrack =
+          participant.user_id === user?.user_id
+            ? localVideoTrack ?? liveParticipant?.cameraTrack
+            : liveParticipant?.cameraTrack;
+
+        if (!cameraTrack || liveParticipant?.isCameraOff) {
+          return [];
+        }
+
+        return [{
+          id: `camera:${participant.user_id}`,
+          kind: "camera" as const,
+          participant,
+          track: cameraTrack,
+        }];
+      }),
+      ...screenShareTiles.map(({ participant, screenShareTrack }) => ({
+        id: `screen-share:${participant.user_id}`,
+        kind: "screen-share" as const,
+        participant,
+        track: screenShareTrack,
+      })),
+    ],
+    [displayedVoiceParticipants, liveParticipantsByUserId, localVideoTrack, screenShareTiles, user?.user_id]
+  );
+  const focusedTile = focusedTileId
+    ? visualTiles.find((tile) => tile.id === focusedTileId) ?? null
+    : null;
+  const focusStripTiles = focusedTile
+    ? [
+        ...displayedVoiceParticipants
+          .filter((participant) => `camera:${participant.user_id}` !== focusedTile.id)
+          .map((participant) => ({ kind: "participant" as const, participant })),
+        ...screenShareTiles
+          .filter(({ participant }) => `screen-share:${participant.user_id}` !== focusedTile.id)
+          .map(({ participant, screenShareTrack }) => ({
+            kind: "screen-share" as const,
+            participant,
+            screenShareTrack,
+          })),
+      ]
+    : [];
 
   const canToggleMedia = isCurrentRoomSession && roomVoiceState.status === "active" && !isSubmitting;
+
+  useEffect(() => {
+    if (!focusedTileId) {
+      return;
+    }
+
+    if (visualTiles.some((tile) => tile.id === focusedTileId)) {
+      return;
+    }
+
+    setFocusedTileId(visualTiles[0]?.id ?? null);
+  }, [focusedTileId, visualTiles]);
 
   const handleJoinVoice = async () => {
     if (!token || !roomIdentifier) return;
@@ -543,6 +813,110 @@ export default function RoomPage(): JSX.Element {
                   )}
                 </div>
               </div>
+            ) : focusedTile ? (
+              <div className="flex h-full min-h-0 flex-col gap-4">
+                <div className="min-h-0 flex-1">
+                  {focusedTile.kind === "camera" ? (
+                    <VoiceTile
+                      participant={focusedTile.participant}
+                      isCurrentUser={focusedTile.participant.user_id === user?.user_id}
+                      isCameraOff={false}
+                      cameraTrack={focusedTile.track}
+                      audioTrack={liveParticipantsByUserId.get(focusedTile.participant.user_id)?.audioTrack}
+                      className="h-full min-h-[22rem]"
+                      isFocused
+                      canFocus
+                      canFullscreen
+                      onFocusToggle={() => setFocusedTileId(null)}
+                      onFullscreenError={setError}
+                    />
+                  ) : (
+                    <ScreenShareTile
+                      participant={focusedTile.participant}
+                      screenShareTrack={focusedTile.track}
+                      className="h-full min-h-[22rem]"
+                      isFocused
+                      canFocus
+                      canFullscreen
+                      onFocusToggle={() => setFocusedTileId(null)}
+                      onFullscreenError={setError}
+                    />
+                  )}
+                </div>
+
+                <div className="shrink-0">
+                  <div className="mb-2 flex items-center justify-between">
+                    <p className="text-sm font-medium text-white/80">Other tiles</p>
+                    <button
+                      type="button"
+                      onClick={() => setFocusedTileId(null)}
+                      className="rounded-md bg-gray-800 px-3 py-1.5 text-sm font-medium text-white transition-colors hover:bg-gray-700"
+                    >
+                      Exit focus
+                    </button>
+                  </div>
+                  <div className="flex gap-3 overflow-x-auto pb-2">
+                    {focusStripTiles.map((tile) => {
+                      if (tile.kind === "participant") {
+                        const liveParticipant = liveParticipantsByUserId.get(tile.participant.user_id);
+                        return (
+                          <div key={`participant-strip:${tile.participant.user_id}`} className="w-72 shrink-0">
+                            <VoiceTile
+                              participant={tile.participant}
+                              isCurrentUser={tile.participant.user_id === user?.user_id}
+                              isCameraOff={liveParticipant?.isCameraOff}
+                              cameraTrack={
+                                tile.participant.user_id === user?.user_id
+                                  ? localVideoTrack ?? liveParticipant?.cameraTrack
+                                  : liveParticipant?.cameraTrack
+                              }
+                              audioTrack={liveParticipant?.audioTrack}
+                              className="aspect-video"
+                              canFocus={Boolean(
+                                (tile.participant.user_id === user?.user_id
+                                  ? localVideoTrack ?? liveParticipant?.cameraTrack
+                                  : liveParticipant?.cameraTrack) && !liveParticipant?.isCameraOff
+                              )}
+                              canFullscreen={Boolean(
+                                (tile.participant.user_id === user?.user_id
+                                  ? localVideoTrack ?? liveParticipant?.cameraTrack
+                                  : liveParticipant?.cameraTrack) && !liveParticipant?.isCameraOff
+                              )}
+                              onFocusToggle={() => setFocusedTileId(`camera:${tile.participant.user_id}`)}
+                              onSelect={
+                                (tile.participant.user_id === user?.user_id
+                                  ? localVideoTrack ?? liveParticipant?.cameraTrack
+                                  : liveParticipant?.cameraTrack) && !liveParticipant?.isCameraOff
+                                  ? () => setFocusedTileId(`camera:${tile.participant.user_id}`)
+                                  : undefined
+                              }
+                              onFullscreenError={setError}
+                            />
+                          </div>
+                        );
+                      }
+
+                      return (
+                        <div
+                          key={`screen-share-strip:${tile.participant.user_id}`}
+                          className="w-72 shrink-0"
+                        >
+                          <ScreenShareTile
+                            participant={tile.participant}
+                            screenShareTrack={tile.screenShareTrack}
+                            className="aspect-video"
+                            canFocus
+                            canFullscreen
+                            onFocusToggle={() => setFocusedTileId(`screen-share:${tile.participant.user_id}`)}
+                            onSelect={() => setFocusedTileId(`screen-share:${tile.participant.user_id}`)}
+                            onFullscreenError={setError}
+                          />
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              </div>
             ) : (
               <div className={`grid ${getGridClass()} gap-4 h-full`}>
                 {displayedVoiceParticipants.map((participant) => (
@@ -557,6 +931,28 @@ export default function RoomPage(): JSX.Element {
                         : liveParticipantsByUserId.get(participant.user_id)?.cameraTrack
                     }
                     audioTrack={liveParticipantsByUserId.get(participant.user_id)?.audioTrack}
+                    canFocus={Boolean(
+                      (participant.user_id === user?.user_id
+                        ? localVideoTrack ?? liveParticipantsByUserId.get(participant.user_id)?.cameraTrack
+                        : liveParticipantsByUserId.get(participant.user_id)?.cameraTrack) &&
+                        !liveParticipantsByUserId.get(participant.user_id)?.isCameraOff
+                    )}
+                    canFullscreen={Boolean(
+                      (participant.user_id === user?.user_id
+                        ? localVideoTrack ?? liveParticipantsByUserId.get(participant.user_id)?.cameraTrack
+                        : liveParticipantsByUserId.get(participant.user_id)?.cameraTrack) &&
+                        !liveParticipantsByUserId.get(participant.user_id)?.isCameraOff
+                    )}
+                    onFocusToggle={() => setFocusedTileId(`camera:${participant.user_id}`)}
+                    onSelect={
+                      (participant.user_id === user?.user_id
+                        ? localVideoTrack ?? liveParticipantsByUserId.get(participant.user_id)?.cameraTrack
+                        : liveParticipantsByUserId.get(participant.user_id)?.cameraTrack) &&
+                        !liveParticipantsByUserId.get(participant.user_id)?.isCameraOff
+                        ? () => setFocusedTileId(`camera:${participant.user_id}`)
+                        : undefined
+                    }
+                    onFullscreenError={setError}
                   />
                 ))}
                 {screenShareTiles.map(({ participant, screenShareTrack }) => (
@@ -564,6 +960,11 @@ export default function RoomPage(): JSX.Element {
                     key={`${participant.user_id}-screen-share`}
                     participant={participant}
                     screenShareTrack={screenShareTrack}
+                    canFocus
+                    canFullscreen
+                    onFocusToggle={() => setFocusedTileId(`screen-share:${participant.user_id}`)}
+                    onSelect={() => setFocusedTileId(`screen-share:${participant.user_id}`)}
+                    onFullscreenError={setError}
                   />
                 ))}
               </div>
