@@ -8,8 +8,16 @@ const getDefaultApiBaseUrl = (): string => {
     return "http://localhost:8080/api";
   }
 
-  const { origin, port } = window.location;
+  const { origin, port, protocol, hostname } = window.location;
   if (port === "1420") {
+    return "http://localhost:8080/api";
+  }
+
+  if (protocol === "tauri:" || protocol === "file:") {
+    return "http://localhost:8080/api";
+  }
+
+  if (hostname === "localhost" || hostname === "127.0.0.1") {
     return "http://localhost:8080/api";
   }
 
@@ -21,8 +29,16 @@ const getDefaultWsBaseUrl = (): string => {
     return "ws://localhost:8080/api/chat/ws";
   }
 
-  const { host, port, protocol } = window.location;
+  const { host, port, protocol, hostname } = window.location;
   if (port === "1420") {
+    return "ws://localhost:8080/api/chat/ws";
+  }
+
+  if (protocol === "tauri:" || protocol === "file:") {
+    return "ws://localhost:8080/api/chat/ws";
+  }
+
+  if (hostname === "localhost" || hostname === "127.0.0.1") {
     return "ws://localhost:8080/api/chat/ws";
   }
 

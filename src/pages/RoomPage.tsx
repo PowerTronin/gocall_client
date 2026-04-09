@@ -29,6 +29,7 @@ interface ControlButtonProps {
   activeIcon?: React.ReactNode;
   isActive?: boolean;
   isDanger?: boolean;
+  isPressed?: boolean;
   disabled?: boolean;
   onClick: () => void;
   label: string;
@@ -39,6 +40,7 @@ const ControlButton: React.FC<ControlButtonProps> = ({
   activeIcon,
   isActive = false,
   isDanger = false,
+  isPressed,
   disabled = false,
   onClick,
   label,
@@ -57,6 +59,9 @@ const ControlButton: React.FC<ControlButtonProps> = ({
       disabled={disabled}
       className={`${baseClasses} ${colorClasses}`}
       title={label}
+      aria-label={label}
+      aria-pressed={isDanger ? undefined : isPressed}
+      aria-disabled={disabled}
     >
       {isActive && activeIcon ? activeIcon : icon}
     </button>
@@ -603,6 +608,7 @@ export default function RoomPage(): JSX.Element {
               icon={<MicOff className="w-5 h-5 text-red-400" />}
               activeIcon={<Mic className="w-5 h-5 text-white" />}
               isActive={isCurrentRoomSession ? roomVoiceState.localMuted : !myVoiceState?.is_mic_enabled}
+              isPressed={Boolean(isCurrentRoomSession ? !roomVoiceState.localMuted : myVoiceState?.is_mic_enabled)}
               disabled={!canToggleMedia}
               onClick={() => void handleToggleMic()}
               label={isCurrentRoomSession && roomVoiceState.localMuted ? "Unmute" : "Mute"}
@@ -612,6 +618,7 @@ export default function RoomPage(): JSX.Element {
               icon={<VideoOff className="w-5 h-5 text-red-400" />}
               activeIcon={<Video className="w-5 h-5 text-white" />}
               isActive={isCurrentRoomSession ? roomVoiceState.localCameraOff : !myVoiceState?.is_camera_enabled}
+              isPressed={Boolean(isCurrentRoomSession ? !roomVoiceState.localCameraOff : myVoiceState?.is_camera_enabled)}
               disabled={!canToggleMedia}
               onClick={() => void handleToggleCamera()}
               label={
@@ -625,6 +632,7 @@ export default function RoomPage(): JSX.Element {
               icon={<MonitorOff className="w-5 h-5 text-red-400" />}
               activeIcon={<Monitor className="w-5 h-5 text-white" />}
               isActive={!(isCurrentRoomSession ? roomVoiceState.screenSharing : Boolean(myVoiceState?.is_screen_sharing))}
+              isPressed={Boolean(isCurrentRoomSession ? roomVoiceState.screenSharing : myVoiceState?.is_screen_sharing)}
               disabled={!canToggleMedia}
               onClick={() => void handleToggleScreenShare()}
               label={

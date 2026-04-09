@@ -93,8 +93,8 @@ export class LiveKitClient {
   private localVideoTrack: LocalVideoTrack | null = null;
   private localAudioTrack: LocalAudioTrack | null = null;
   private screenShareTrack: LocalVideoTrack | null = null;
-  private isMicMuted = false;
-  private isCameraMuted = false;
+  private isMicMuted = true;
+  private isCameraMuted = true;
   private isScreenSharing = false;
 
   private ensureMediaDevicesAvailable(feature: 'microphone' | 'camera' | 'screen share'): void {
@@ -134,6 +134,8 @@ export class LiveKitClient {
 
     try {
       await this.room.connect(credentials.url, credentials.token);
+      this.handlers.onMicMuted?.(true);
+      this.handlers.onCameraMuted?.(true);
       this.handlers.onConnected?.();
     } catch (err) {
       this.handleError(err instanceof Error ? err : new Error(String(err)));

@@ -34,6 +34,7 @@ const ChatPage: React.FC = () => {
 
   const socketRef = useRef<WebSocket | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const loadRequestIdRef = useRef(0);
   const routeState = location.state as { friendUsername?: string } | null;
 
   const friendUserID = friendId ? decodeURIComponent(friendId) : "";
@@ -49,6 +50,8 @@ const ChatPage: React.FC = () => {
         return;
       }
 
+      const requestId = loadRequestIdRef.current + 1;
+      loadRequestIdRef.current = requestId;
       setIsLoading(true);
       setError(null);
 
@@ -64,12 +67,21 @@ const ChatPage: React.FC = () => {
             : getUserInfo(token, friendUserID),
         ]);
 
+        if (loadRequestIdRef.current !== requestId) {
+          return;
+        }
+
         setMessages(history);
         setFriendUsername(friendInfo.username || `user-${friendUserID}`);
       } catch (err) {
+        if (loadRequestIdRef.current !== requestId) {
+          return;
+        }
         setError(err instanceof Error ? err.message : "Failed to load chat");
       } finally {
-        setIsLoading(false);
+        if (loadRequestIdRef.current === requestId) {
+          setIsLoading(false);
+        }
       }
     };
 

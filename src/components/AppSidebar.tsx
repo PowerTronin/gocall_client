@@ -27,19 +27,26 @@ const AppSidebar: React.FC = () => {
 
   useEffect(() => {
     if (!token) return;
-    const loadSidebarData = async () => {
+    const loadPinned = async () => {
       try {
-        const [pinnedList, conversationList] = await Promise.all([
-          fetchPinnedFriends(token),
-          fetchConversations(token),
-        ]);
+        const pinnedList = await fetchPinnedFriends(token);
         setPinned(pinnedList);
+      } catch (err) {
+        console.error(err);
+      }
+    };
+
+    const loadConversations = async () => {
+      try {
+        const conversationList = await fetchConversations(token);
         setConversations(conversationList);
       } catch (err) {
         console.error(err);
       }
     };
-    loadSidebarData();
+
+    void loadPinned();
+    void loadConversations();
   }, [token]);
 
   const handlePinnedClick = (friend: Friend) => {

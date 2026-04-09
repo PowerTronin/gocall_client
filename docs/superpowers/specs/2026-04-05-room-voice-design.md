@@ -127,25 +127,25 @@ The implementation needs a room-scoped voice/session API rather than an ad hoc r
 
 Recommended backend contract:
 
-- `GET /rooms/:id/state`
-- `POST /rooms/:id/voice/join`
-- `POST /rooms/:id/voice/leave`
+- `GET /api/rooms/:id/state`
+- `POST /api/rooms/:id/voice/join`
+- `POST /api/rooms/:id/voice/leave`
 
-`GET /rooms/:id/state` should return:
+`GET /api/rooms/:id/state` should return:
 
 - room metadata
 - room members
 - voice participants
 - per-participant media state
 
-`POST /rooms/:id/voice/join` should return:
+`POST /api/rooms/:id/voice/join` should return:
 
 - media server URL
 - media access token
 - stable room media identity
 - participant identity
 
-`POST /rooms/:id/voice/leave` should:
+`POST /api/rooms/:id/voice/leave` should:
 
 - remove the user from room voice presence
 - terminate the user's room media session
