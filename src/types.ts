@@ -10,12 +10,14 @@ export interface User {
   created_at: string;
 }
 
+// UserInfo is the minimal user lookup payload used by lightweight API responses.
 export interface UserInfo {
   id: number;
   username: string;
   name: string;
 }
 
+// Room describes a room entry returned by room list and create endpoints.
 export interface Room {
   room_id: string;
   user_id: string; // можно использовать string (UUID)
@@ -25,6 +27,7 @@ export interface Room {
   is_owner?: boolean;
 }
 
+// RoomMember describes a member entry in room membership lists.
 export interface RoomMember {
   id: number;
   room_id: string;
@@ -52,6 +55,7 @@ export interface Friend {
   created_at: string;
 }
 
+// FriendRequest describes an incoming or outgoing friend request.
 export interface FriendRequest {
   id: number;
   from_user_id: string;
@@ -61,6 +65,7 @@ export interface FriendRequest {
   created_at: string;
 }
 
+// RoomInvite describes a pending invitation to join a room.
 export interface RoomInvite {
   id: number;
   room_id: string;
@@ -70,6 +75,7 @@ export interface RoomInvite {
   created_at: string;
 }
 
+// IChatMessageResponse describes one persisted direct chat message.
 export interface IChatMessageResponse {
   id: number,
   sender_id: string,
@@ -78,6 +84,7 @@ export interface IChatMessageResponse {
   created_at: string,
 }
 
+// ConversationInfo describes one direct-message conversation preview.
 export interface ConversationInfo {
   user_id: string;
   username: string;

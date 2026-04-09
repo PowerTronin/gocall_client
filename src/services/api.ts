@@ -31,6 +31,7 @@ export const headers = (token?: string) => ({
     "X-Client-Type": "desktop",
   });
 
+// checkAPIStatus verifies that the backend healthcheck endpoint responds.
 export async function checkAPIStatus(): Promise<boolean> {
   try {
     const response = await fetch(`${API_BASE_URL}/ping`, { method: "GET" });
@@ -42,6 +43,7 @@ export async function checkAPIStatus(): Promise<boolean> {
   }
 }
 
+// validateToken confirms token freshness locally and against the backend profile endpoint.
 export async function validateToken(token: string): Promise<boolean> {
   try {
     const user = decodeJWT(token);
@@ -67,6 +69,7 @@ export async function validateToken(token: string): Promise<boolean> {
   }
 }
   
+// login authenticates a user and returns the issued JWT.
 export async function login(username: string, password: string): Promise<string> {
   try {
     const response = await fetch(`${API_BASE_URL}/auth/login`, {
@@ -87,6 +90,7 @@ export async function login(username: string, password: string): Promise<string>
   }
 }
 
+// register creates a new user account and returns the server response token if present.
 export async function register(username: string, password: string): Promise<string> {
   try {
     const response = await fetch(`${API_BASE_URL}/auth/register`, {
@@ -107,6 +111,7 @@ export async function register(username: string, password: string): Promise<stri
   }
 }
 
+// getUserID fetches the authenticated user's UUID from the backend.
 export async function getUserID(token: string): Promise<string> {
   const response = await fetch(`${API_BASE_URL}/user/id`, {
     method: "GET",
@@ -173,6 +178,7 @@ export async function getUserInfo(token: string, uuid: string): Promise<UserInfo
   };
 }
 
+// getMe fetches the authenticated user's current profile from the backend.
 export async function getMe(token: string): Promise<User> {
   const response = await fetch(`${API_BASE_URL}/user/me`, {
     method: "GET",

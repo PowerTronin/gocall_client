@@ -16,6 +16,7 @@ async function getAPIError(response: Response, fallback: string): Promise<string
   return message;
 }
 
+// RoomMemberState represents one room member in the room state response.
 export interface RoomMemberState {
   id: number;
   user_id: string;
@@ -26,6 +27,7 @@ export interface RoomMemberState {
   joined_at: string;
 }
 
+// RoomVoiceParticipantState represents one active room voice participant.
 export interface RoomVoiceParticipantState {
   id: number;
   user_id: string;
@@ -39,6 +41,7 @@ export interface RoomVoiceParticipantState {
   updated_at: string;
 }
 
+// RoomStateResponse contains room metadata, members, and room voice presence.
 export interface RoomStateResponse {
   room: {
     id: number;
@@ -54,6 +57,7 @@ export interface RoomStateResponse {
   in_voice: boolean;
 }
 
+// RoomVoiceCredentialsResponse contains LiveKit join credentials for room voice.
 export interface RoomVoiceCredentialsResponse {
   url: string;
   token: string;
@@ -149,6 +153,7 @@ export async function joinRoomAsMember(roomID: string, token: string): Promise<v
   }
 }
 
+// fetchRoomState returns the current room metadata and room voice presence snapshot.
 export async function fetchRoomState(roomID: string, token: string): Promise<RoomStateResponse> {
   const response = await fetch(`${API_BASE_URL}/rooms/${roomID}/state`, {
     method: "GET",
@@ -160,6 +165,7 @@ export async function fetchRoomState(roomID: string, token: string): Promise<Roo
   return response.json();
 }
 
+// joinRoomVoice creates room-scoped voice presence for the current user.
 export async function joinRoomVoice(roomID: string, token: string): Promise<void> {
   const response = await fetch(`${API_BASE_URL}/rooms/${roomID}/voice/join`, {
     method: "POST",
@@ -170,6 +176,7 @@ export async function joinRoomVoice(roomID: string, token: string): Promise<void
   }
 }
 
+// leaveRoomVoice removes room-scoped voice presence for the current user.
 export async function leaveRoomVoice(roomID: string, token: string): Promise<void> {
   const response = await fetch(`${API_BASE_URL}/rooms/${roomID}/voice/leave`, {
     method: "POST",
@@ -180,6 +187,7 @@ export async function leaveRoomVoice(roomID: string, token: string): Promise<voi
   }
 }
 
+// updateRoomVoiceMedia updates room voice media flags for the current user.
 export async function updateRoomVoiceMedia(
   roomID: string,
   payload: {
@@ -199,6 +207,7 @@ export async function updateRoomVoiceMedia(
   }
 }
 
+// fetchRoomVoiceCredentials fetches LiveKit credentials for the current room voice session.
 export async function fetchRoomVoiceCredentials(
   roomID: string,
   token: string

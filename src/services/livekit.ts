@@ -25,6 +25,7 @@ export interface LiveKitCredentials {
   roomName: string;
 }
 
+// TrackInfo describes one published or subscribed LiveKit track.
 export interface TrackInfo {
   trackSid: string;
   participantId: string;
@@ -34,6 +35,7 @@ export interface TrackInfo {
   track: Track;
 }
 
+// ParticipantInfo describes the media state for a single LiveKit participant.
 export interface ParticipantInfo {
   sid: string;
   identity: string;
@@ -47,6 +49,7 @@ export interface ParticipantInfo {
   isScreenSharing: boolean;
 }
 
+// LiveKitConnectionState is the simplified room connection state exposed to the app.
 export type LiveKitConnectionState = 'disconnected' | 'connecting' | 'connected' | 'reconnecting';
 
 // === Event Handlers ===

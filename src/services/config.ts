@@ -30,12 +30,14 @@ const getDefaultWsBaseUrl = (): string => {
   return `${wsProtocol}//${host}/api/chat/ws`;
 };
 
+// API_BASE_URL is the resolved base URL for HTTP API requests.
 export const API_BASE_URL = trimTrailingSlashes(
   envApiBaseUrl && envApiBaseUrl.length > 0
     ? envApiBaseUrl
     : getDefaultApiBaseUrl()
 );
 
+// WS_BASE_URL is the resolved base URL for chat websocket connections.
 export const WS_BASE_URL = trimTrailingSlashes(
   envWsUrl && envWsUrl.length > 0 ? envWsUrl : getDefaultWsBaseUrl()
 );

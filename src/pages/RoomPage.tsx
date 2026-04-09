@@ -203,6 +203,7 @@ const ScreenShareTile: React.FC<{
   );
 };
 
+// RoomPage renders room membership, room voice controls, and room media tiles.
 export default function RoomPage(): JSX.Element {
   const { roomID } = useParams();
   const navigate = useNavigate();

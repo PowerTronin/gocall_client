@@ -22,8 +22,10 @@ import {
   updateRoomVoiceMedia,
 } from "../services/rooms-api";
 
+// RoomVoiceStatus represents the lifecycle of the room-scoped voice session.
 export type RoomVoiceStatus = "idle" | "connecting" | "active";
 
+// RoomVoiceState stores the current room voice session, participants, and local media flags.
 export interface RoomVoiceState {
   status: RoomVoiceStatus;
   roomId: string | null;
@@ -64,6 +66,7 @@ interface RoomVoiceContextValue {
 
 const RoomVoiceContext = createContext<RoomVoiceContextValue | undefined>(undefined);
 
+// RoomVoiceProvider manages the persistent room-scoped voice session and LiveKit client.
 export const RoomVoiceProvider: React.FC<{ children: React.ReactNode }> = ({
   children,
 }) => {

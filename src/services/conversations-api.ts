@@ -2,6 +2,7 @@ import { ConversationInfo } from "../types";
 import { headers } from "./api";
 import { API_BASE_URL } from "./config";
 
+// fetchConversations returns the user's existing direct-message conversation previews.
 export async function fetchConversations(token: string): Promise<ConversationInfo[]> {
   const response = await fetch(`${API_BASE_URL}/chat/conversations`, {
     method: "GET",

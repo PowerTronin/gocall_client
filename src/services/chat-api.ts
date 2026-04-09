@@ -2,6 +2,7 @@ import { IChatMessageResponse } from "../types";
 import { API_BASE_URL, WS_BASE_URL } from "./config";
 import { headers } from "./api";
 
+// fetchDirectChatHistory returns the ordered direct-message history with another user.
 export async function fetchDirectChatHistory(
   token: string,
   withUserID: string
@@ -24,6 +25,7 @@ export async function fetchDirectChatHistory(
   return payload.messages ?? [];
 }
 
+// DirectChatSocketHandlers contains callbacks for direct chat websocket lifecycle events.
 export interface DirectChatSocketHandlers {
   onOpen?: () => void;
   onClose?: () => void;
@@ -31,6 +33,7 @@ export interface DirectChatSocketHandlers {
   onMessage?: (message: { from: string; to: string; message: string }) => void;
 }
 
+// connectDirectChatSocket opens a direct chat websocket and wires the provided callbacks.
 export function connectDirectChatSocket(
   token: string,
   handlers: DirectChatSocketHandlers
