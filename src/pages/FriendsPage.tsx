@@ -159,7 +159,9 @@ const FriendsPage: React.FC = () => {
       await requestFriend(targetUser.username, token);
       setSuccess(`Заявка в друзья для ${targetUser.username} отправлена`);
       setTimeout(() => setSuccess(""), 3000);
-      setSearchResults((prev) => prev.filter((foundUser) => foundUser.id !== targetUser.id));
+      abortRef.current?.abort();
+      setIsSearching(false);
+      setSearchResults([]);
       setSearchQuery("");
     } catch (err: any) {
       setError(err.message || "Failed to send friend request");

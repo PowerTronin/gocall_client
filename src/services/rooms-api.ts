@@ -66,6 +66,75 @@ export interface RoomVoiceCredentialsResponse {
   name: string;
 }
 
+const normalizeRoom = (payload: {
+  room_id: string;
+  user_id: string;
+  name: string;
+  type: string;
+  created_at: string;
+}): Room => ({
+  room_id: payload.room_id,
+  user_id: payload.user_id,
+  name: payload.name,
+  type: payload.type,
+  created_at: payload.created_at,
+});
+
+async function fetchRoom(roomID: string, token: string): Promise<Room> {
+  const response = await fetch(`${API_BASE_URL}/rooms/${roomID}`, {
+    method: "GET",
+    headers: headers(token),
+  });
+  if (!response.ok) {
+    throw new Error(await getAPIError(response, "Failed to fetch room"));
+  }
+
+  const payload = (await response.json()) as {
+    room?: {
+      room_id: string;
+      user_id: string;
+      name: string;
+      type: string;
+      created_at: string;
+    };
+  };
+
+  if (!payload.room) {
+    throw new Error("Room payload is missing in response");
+  }
+
+  return normalizeRoom(payload.room);
+}
+
+async function fetchRoomUpdatePayload(
+  roomID: string,
+  token: string
+): Promise<{ type: string; password: string }> {
+  const response = await fetch(`${API_BASE_URL}/rooms/${roomID}`, {
+    method: "GET",
+    headers: headers(token),
+  });
+  if (!response.ok) {
+    throw new Error(await getAPIError(response, "Failed to fetch room"));
+  }
+
+  const payload = (await response.json()) as {
+    room?: {
+      type?: string;
+      password?: string;
+    };
+  };
+
+  if (!payload.room?.type) {
+    throw new Error("Room update payload is missing in response");
+  }
+
+  return {
+    type: payload.room.type,
+    password: typeof payload.room.password === "string" ? payload.room.password : "",
+  };
+}
+
 // Функция для получения списка приглашений в комнаты (GET /api/rooms/invites)
 export async function fetchRoomInvites(token: string): Promise<RoomInvite[]> {
   void token;
@@ -118,14 +187,12 @@ export async function createRoom(name: string, token: string): Promise<Room> {
   if (!response.ok) {
     throw new Error(await getAPIError(response, "Failed to create room"));
   }
-  const data = await response.json();
-  return {
-    room_id: data.roomID,
-    name: data.name,
-    type: data.type,
-    user_id: "",
-    created_at: new Date().toISOString(),
-  };
+  const data = (await response.json()) as { roomID?: string };
+  if (!data.roomID) {
+    throw new Error("Created room ID is missing in response");
+  }
+
+  return fetchRoom(data.roomID, token);
 }
 
 /** Удаление комнаты (DELETE /rooms/:id) */
@@ -247,10 +314,15 @@ export async function inviteFriendToRoom(
 
 /** Обновление комнаты (PUT /rooms/:id) */
 export async function updateRoom(roomID: string, name: string, token: string): Promise<void> {
+  const currentRoom = await fetchRoomUpdatePayload(roomID, token);
   const response = await fetch(`${API_BASE_URL}/rooms/${roomID}`, {
     method: "PUT",
     headers: headers(token),
-    body: JSON.stringify({ name, type: "public", password: "" }),
+    body: JSON.stringify({
+      name,
+      type: currentRoom.type,
+      password: currentRoom.password,
+    }),
   });
   if (!response.ok) {
     const errorData = await response.json().catch(() => ({}));

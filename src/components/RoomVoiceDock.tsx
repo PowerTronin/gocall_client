@@ -21,6 +21,8 @@ const RoomVoiceDock: React.FC = () => {
     return null;
   }
 
+  const encodedRoomId = encodeURIComponent(state.roomId);
+
   return (
     <div className="fixed right-6 bottom-6 z-40 w-[360px] rounded-2xl border border-gray-700 bg-gray-900/95 shadow-2xl backdrop-blur">
       <div className="flex items-center justify-between px-4 py-3 border-b border-gray-800">
@@ -38,7 +40,11 @@ const RoomVoiceDock: React.FC = () => {
 
         <button
           type="button"
-          onClick={() => navigate(`/room/${state.roomId}`, { state: { roomName: state.roomName } })}
+          onClick={() =>
+            navigate(`/room/${encodedRoomId}`, {
+              state: { roomName: state.roomName },
+            })
+          }
           className="px-3 py-1.5 rounded-lg bg-emerald-500 hover:bg-emerald-400 text-sm font-medium text-gray-950 transition-colors"
         >
           Open Room

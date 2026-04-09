@@ -72,6 +72,7 @@ export const RoomVoiceProvider: React.FC<{ children: React.ReactNode }> = ({
 }) => {
   const { token, logout } = useAuth();
   const clientRef = useRef<LiveKitClient | null>(null);
+  const transitionInProgressRef = useRef(false);
   const [state, setState] = useState<RoomVoiceState>(initialState);
 
   const isSessionError = useCallback((message: string) => {
@@ -144,6 +145,10 @@ export const RoomVoiceProvider: React.FC<{ children: React.ReactNode }> = ({
 
   const joinRoomVoiceSession = useCallback(
     async (roomId: string, roomName?: string) => {
+      if (transitionInProgressRef.current) {
+        return;
+      }
+
       if (!token) {
         resetState("Not authenticated");
         return;
@@ -157,19 +162,21 @@ export const RoomVoiceProvider: React.FC<{ children: React.ReactNode }> = ({
         clientRef.current = createLiveKitClient();
       }
 
-      if (state.roomId && state.roomId !== roomId) {
-        await leaveRoomVoiceSession();
-      }
-
-      setState((current) => ({
-        ...current,
-        status: "connecting",
-        roomId,
-        roomName: roomName ?? current.roomName,
-        error: null,
-      }));
+      transitionInProgressRef.current = true;
 
       try {
+        if (state.roomId && state.roomId !== roomId) {
+          await leaveRoomVoiceSession();
+        }
+
+        setState((current) => ({
+          ...current,
+          status: "connecting",
+          roomId,
+          roomName: roomName ?? current.roomName,
+          error: null,
+        }));
+
         await joinRoomVoice(roomId, token);
         const credentials = await fetchRoomVoiceCredentials(roomId, token);
 
@@ -239,6 +246,8 @@ export const RoomVoiceProvider: React.FC<{ children: React.ReactNode }> = ({
           return;
         }
         resetState(message);
+      } finally {
+        transitionInProgressRef.current = false;
       }
     },
     [handleSessionFailure, isSessionError, leaveRoomVoiceSession, resetState, state.roomId, syncParticipants, token]

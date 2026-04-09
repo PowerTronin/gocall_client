@@ -31,6 +31,88 @@ export const headers = (token?: string) => ({
     "X-Client-Type": "desktop",
   });
 
+const toNumber = (value: unknown): number => {
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return value;
+  }
+  if (typeof value === "string" && value.trim().length > 0) {
+    const parsed = Number(value);
+    if (Number.isFinite(parsed)) {
+      return parsed;
+    }
+  }
+  return 0;
+};
+
+const normalizeUserPayload = (payload: unknown): User => {
+  const root =
+    payload && typeof payload === "object" && "user" in payload
+      ? (payload as { user?: unknown }).user
+      : payload;
+
+  if (!root || typeof root !== "object") {
+    throw new Error("Current user payload is missing");
+  }
+
+  const candidate = root as Record<string, unknown>;
+  const username =
+    typeof candidate.username === "string"
+      ? candidate.username
+      : typeof candidate.Username === "string"
+        ? candidate.Username
+        : typeof candidate.user_name === "string"
+          ? candidate.user_name
+          : typeof candidate.UserName === "string"
+            ? candidate.UserName
+            : "";
+  const userID =
+    typeof candidate.user_id === "string"
+      ? candidate.user_id
+      : typeof candidate.UserID === "string"
+        ? candidate.UserID
+        : "";
+
+  if (!username || !userID) {
+    throw new Error("Current user payload is invalid");
+  }
+
+  const id = toNumber(candidate.id ?? candidate.ID);
+  const name =
+    typeof candidate.name === "string"
+      ? candidate.name
+      : typeof candidate.Name === "string"
+        ? candidate.Name
+        : username;
+  const email =
+    typeof candidate.email === "string"
+      ? candidate.email
+      : typeof candidate.Email === "string"
+        ? candidate.Email
+        : "";
+  const isOnline =
+    typeof candidate.is_online === "boolean"
+      ? candidate.is_online
+      : typeof candidate.IsOnline === "boolean"
+        ? candidate.IsOnline
+        : true;
+  const createdAt =
+    typeof candidate.created_at === "string"
+      ? candidate.created_at
+      : typeof candidate.CreatedAt === "string"
+        ? candidate.CreatedAt
+        : new Date().toISOString();
+
+  return {
+    id,
+    user_id: userID,
+    username,
+    name,
+    email,
+    is_online: isOnline,
+    created_at: createdAt,
+  };
+};
+
 // checkAPIStatus verifies that the backend healthcheck endpoint responds.
 export async function checkAPIStatus(): Promise<boolean> {
   try {
@@ -190,5 +272,5 @@ export async function getMe(token: string): Promise<User> {
     throw new Error(errorData.error || "Failed to fetch current user");
   }
 
-  return response.json();
+  return normalizeUserPayload(await response.json());
 }

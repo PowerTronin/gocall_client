@@ -21,8 +21,10 @@ export async function fetchDirectChatHistory(
     throw new Error(errorData.error || "Failed to fetch chat history");
   }
 
-  const payload = (await response.json()) as { messages?: IChatMessageResponse[] };
-  return payload.messages ?? [];
+  const payload = (await response.json()) as { messages?: unknown };
+  return Array.isArray(payload.messages)
+    ? (payload.messages as IChatMessageResponse[])
+    : [];
 }
 
 // DirectChatSocketHandlers contains callbacks for direct chat websocket lifecycle events.
@@ -51,7 +53,11 @@ export function connectDirectChatSocket(
         message?: string;
       };
 
-      if (!payload.from || !payload.to || typeof payload.message !== "string") {
+      if (
+        typeof payload.from !== "string" ||
+        typeof payload.to !== "string" ||
+        typeof payload.message !== "string"
+      ) {
         return;
       }
 
