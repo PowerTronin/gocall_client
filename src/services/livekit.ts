@@ -7,6 +7,7 @@ import {
   Room,
   RoomEvent,
   Track,
+  TrackPublication,
   LocalTrack,
   RemoteTrack,
   RemoteParticipant,
@@ -42,6 +43,7 @@ export interface ParticipantInfo {
   cameraTrack?: Track;
   screenShareTrack?: Track;
   audioTrack?: Track;
+  screenShareAudioTrack?: Track;
   isMuted: boolean;
   isCameraOff: boolean;
   isScreenSharing: boolean;
@@ -70,6 +72,7 @@ export interface LiveKitEventHandlers {
   // Participant events
   onParticipantConnected?: (participant: ParticipantInfo) => void;
   onParticipantDisconnected?: (participant: ParticipantInfo) => void;
+  onActiveSpeakersChanged?: (participantIdentities: string[]) => void;
 
   // Media state
   onMicMuted?: (muted: boolean) => void;
@@ -173,6 +176,10 @@ export class LiveKitClient {
       this.handlers.onDisconnected?.();
     });
 
+    this.room.on(RoomEvent.ActiveSpeakersChanged, (participants) => {
+      this.handlers.onActiveSpeakersChanged?.(participants.map((participant) => participant.identity));
+    });
+
     // Track events
     this.room.on(RoomEvent.TrackSubscribed, (track, _publication, participant) => {
       const trackInfo = this.createTrackInfo(track, participant, false);
@@ -265,10 +272,12 @@ export class LiveKitClient {
     isLocal: boolean
   ): ParticipantInfo {
     const screenSharePublication = participant.getTrackPublication(Track.Source.ScreenShare);
+    const screenShareAudioPublication = participant.getTrackPublication(Track.Source.ScreenShareAudio);
     const cameraPublication = participant.getTrackPublication(Track.Source.Camera);
-    const screenShareTrack = screenSharePublication?.track;
-    const cameraTrack = cameraPublication?.track;
-    const audioTrack = participant.getTrackPublication(Track.Source.Microphone)?.track;
+    const screenShareTrack = this.getLiveTrack(screenSharePublication);
+    const screenShareAudioTrack = this.getLiveTrack(screenShareAudioPublication);
+    const cameraTrack = this.getLiveTrack(cameraPublication);
+    const audioTrack = this.getLiveTrack(participant.getTrackPublication(Track.Source.Microphone));
 
     return {
       sid: participant.sid,
@@ -278,10 +287,24 @@ export class LiveKitClient {
       cameraTrack: cameraTrack || undefined,
       screenShareTrack: screenShareTrack || undefined,
       audioTrack: audioTrack || undefined,
+      screenShareAudioTrack: screenShareAudioTrack || undefined,
       isMuted: participant.getTrackPublication(Track.Source.Microphone)?.isMuted ?? true,
       isCameraOff: cameraPublication?.isMuted ?? true,
       isScreenSharing: !(screenSharePublication?.isMuted ?? true) && Boolean(screenShareTrack),
     };
+  }
+
+  private getLiveTrack(publication?: TrackPublication): Track | undefined {
+    const track = publication?.track;
+    if (!track) {
+      return undefined;
+    }
+
+    if (track.mediaStreamTrack.readyState !== 'live') {
+      return undefined;
+    }
+
+    return track;
   }
 
   private handleError(error: Error): void {

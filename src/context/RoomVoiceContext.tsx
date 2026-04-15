@@ -29,6 +29,8 @@ export interface RoomVoiceState {
   roomId: string | null;
   roomName: string | null;
   participants: ParticipantInfo[];
+  activeSpeakerIds: string[];
+  activeScreenShareSpeakerIds: string[];
   localMuted: boolean;
   localCameraOff: boolean;
   screenSharing: boolean;
@@ -41,6 +43,8 @@ const initialState: RoomVoiceState = {
   roomId: null,
   roomName: null,
   participants: [],
+  activeSpeakerIds: [],
+  activeScreenShareSpeakerIds: [],
   localMuted: true,
   localCameraOff: true,
   screenSharing: false,
@@ -69,6 +73,33 @@ export const RoomVoiceProvider: React.FC<{ children: React.ReactNode }> = ({
 }) => {
   const { token, logout } = useAuth();
   const clientRef = useRef<LiveKitClient | null>(null);
+  const activityHoldMs = 1000;
+  const speakerActivityRef = useRef<Map<string, number>>(new Map());
+  const screenShareActivityRef = useRef<Map<string, number>>(new Map());
+  const micAnalyserRef = useRef<
+    Map<
+      string,
+      {
+        participantId: string;
+        audioContext: AudioContext;
+        analyser: AnalyserNode;
+        source: MediaStreamAudioSourceNode;
+        data: Uint8Array;
+      }
+    >
+  >(new Map());
+  const screenShareAnalyserRef = useRef<
+    Map<
+      string,
+      {
+        participantId: string;
+        audioContext: AudioContext;
+        analyser: AnalyserNode;
+        source: MediaStreamAudioSourceNode;
+        data: Uint8Array;
+      }
+    >
+  >(new Map());
   const [state, setState] = useState<RoomVoiceState>(initialState);
 
   const isSessionError = useCallback((message: string) => {
@@ -80,18 +111,245 @@ export const RoomVoiceProvider: React.FC<{ children: React.ReactNode }> = ({
     setState((current) => ({ ...current, participants }));
   }, []);
 
+  const syncHeldActivity = useCallback(() => {
+    const now = Date.now();
+
+    const activeSpeakerIds = Array.from(speakerActivityRef.current.entries())
+      .filter(([, timestamp]) => now - timestamp < activityHoldMs)
+      .map(([participantId]) => participantId);
+    const activeScreenShareSpeakerIds = Array.from(screenShareActivityRef.current.entries())
+      .filter(([, timestamp]) => now - timestamp < activityHoldMs)
+      .map(([participantId]) => participantId);
+
+    setState((current) => ({
+      ...current,
+      activeSpeakerIds,
+      activeScreenShareSpeakerIds,
+    }));
+  }, [activityHoldMs]);
+
+  const calculateRms = useCallback((data: Uint8Array) => {
+    let sum = 0;
+
+    for (let index = 0; index < data.length; index += 1) {
+      const normalized = (data[index] - 128) / 128;
+      sum += normalized * normalized;
+    }
+
+    return Math.sqrt(sum / Math.max(data.length, 1));
+  }, []);
+
   useEffect(() => {
     if (!clientRef.current) {
       clientRef.current = createLiveKitClient();
     }
 
     return () => {
+      micAnalyserRef.current.forEach(({ source, audioContext }) => {
+        source.disconnect();
+        void audioContext.close();
+      });
+      micAnalyserRef.current.clear();
+      screenShareAnalyserRef.current.forEach(({ source, audioContext }) => {
+        source.disconnect();
+        void audioContext.close();
+      });
+      screenShareAnalyserRef.current.clear();
       void clientRef.current?.disconnect();
       clientRef.current?.clearHandlers();
     };
   }, []);
 
+  useEffect(() => {
+    const interval = window.setInterval(() => {
+      syncHeldActivity();
+    }, 150);
+
+    return () => window.clearInterval(interval);
+  }, [syncHeldActivity]);
+
+  useEffect(() => {
+    const nextParticipantIds = new Set(
+      state.participants
+        .filter((participant) => participant.audioTrack)
+        .map((participant) => participant.identity)
+    );
+
+    micAnalyserRef.current.forEach((entry, participantId) => {
+      if (nextParticipantIds.has(participantId)) {
+        return;
+      }
+
+      entry.source.disconnect();
+      void entry.audioContext.close();
+      micAnalyserRef.current.delete(participantId);
+      speakerActivityRef.current.delete(participantId);
+    });
+
+    state.participants.forEach((participant) => {
+      const audioTrack = participant.audioTrack;
+      if (!audioTrack) {
+        return;
+      }
+
+      const existing = micAnalyserRef.current.get(participant.identity);
+      if (existing) {
+        return;
+      }
+
+      const AudioContextCtor = window.AudioContext ?? (window as typeof window & {
+        webkitAudioContext?: typeof AudioContext;
+      }).webkitAudioContext;
+
+      if (!AudioContextCtor) {
+        return;
+      }
+
+      try {
+        const audioContext = new AudioContextCtor();
+        const mediaStream = new MediaStream([audioTrack.mediaStreamTrack]);
+        const source = audioContext.createMediaStreamSource(mediaStream);
+        const analyser = audioContext.createAnalyser();
+        analyser.fftSize = 1024;
+        analyser.smoothingTimeConstant = 0.7;
+        source.connect(analyser);
+        void audioContext.resume().catch(() => {
+          // Best effort for browsers that require a user gesture.
+        });
+
+        micAnalyserRef.current.set(participant.identity, {
+          participantId: participant.identity,
+          audioContext,
+          analyser,
+          source,
+          data: new Uint8Array(analyser.fftSize),
+        });
+      } catch (error) {
+        console.warn("[RoomVoiceContext] Failed to initialize microphone analyser:", error);
+      }
+    });
+
+    const poll = window.setInterval(() => {
+      const now = Date.now();
+
+      micAnalyserRef.current.forEach((entry) => {
+        if (entry.audioContext.state === "suspended") {
+          void entry.audioContext.resume().catch(() => {
+            // Ignore and keep polling.
+          });
+          return;
+        }
+
+        entry.analyser.getByteTimeDomainData(entry.data);
+        const rms = calculateRms(entry.data);
+
+        if (rms > 0.02) {
+          speakerActivityRef.current.set(entry.participantId, now);
+        }
+      });
+    }, 150);
+
+    return () => window.clearInterval(poll);
+  }, [calculateRms, state.participants]);
+
+  useEffect(() => {
+    const nextParticipantIds = new Set(
+      state.participants
+        .filter((participant) => participant.screenShareAudioTrack)
+        .map((participant) => participant.identity)
+    );
+
+    screenShareAnalyserRef.current.forEach((entry, participantId) => {
+      if (nextParticipantIds.has(participantId)) {
+        return;
+      }
+
+      entry.source.disconnect();
+      void entry.audioContext.close();
+      screenShareAnalyserRef.current.delete(participantId);
+      screenShareActivityRef.current.delete(participantId);
+    });
+
+    state.participants.forEach((participant) => {
+      const screenShareAudioTrack = participant.screenShareAudioTrack;
+      if (!screenShareAudioTrack) {
+        return;
+      }
+
+      const existing = screenShareAnalyserRef.current.get(participant.identity);
+      if (existing) {
+        return;
+      }
+
+      const AudioContextCtor = window.AudioContext ?? (window as typeof window & {
+        webkitAudioContext?: typeof AudioContext;
+      }).webkitAudioContext;
+
+      if (!AudioContextCtor) {
+        return;
+      }
+
+      try {
+        const audioContext = new AudioContextCtor();
+        const mediaStream = new MediaStream([screenShareAudioTrack.mediaStreamTrack]);
+        const source = audioContext.createMediaStreamSource(mediaStream);
+        const analyser = audioContext.createAnalyser();
+        analyser.fftSize = 1024;
+        analyser.smoothingTimeConstant = 0.7;
+        source.connect(analyser);
+        void audioContext.resume().catch(() => {
+          // Best effort for browsers that require a user gesture.
+        });
+
+        screenShareAnalyserRef.current.set(participant.identity, {
+          participantId: participant.identity,
+          audioContext,
+          analyser,
+          source,
+          data: new Uint8Array(analyser.fftSize),
+        });
+      } catch (error) {
+        console.warn("[RoomVoiceContext] Failed to initialize screen-share analyser:", error);
+      }
+    });
+
+    const poll = window.setInterval(() => {
+      const now = Date.now();
+
+      screenShareAnalyserRef.current.forEach((entry) => {
+        if (entry.audioContext.state === "suspended") {
+          void entry.audioContext.resume().catch(() => {
+            // Ignore and keep polling.
+          });
+          return;
+        }
+
+        entry.analyser.getByteTimeDomainData(entry.data);
+        const rms = calculateRms(entry.data);
+
+        if (rms > 0.02) {
+          screenShareActivityRef.current.set(entry.participantId, now);
+        }
+      });
+    }, 150);
+
+    return () => window.clearInterval(poll);
+  }, [calculateRms, state.participants]);
+
   const resetState = useCallback((error: string | null = null) => {
+    speakerActivityRef.current.clear();
+    screenShareActivityRef.current.clear();
+    micAnalyserRef.current.forEach(({ source, audioContext }) => {
+      source.disconnect();
+      void audioContext.close();
+    });
+    micAnalyserRef.current.clear();
+    screenShareAnalyserRef.current.forEach(({ source, audioContext }) => {
+      source.disconnect();
+      void audioContext.close();
+    });
+    screenShareAnalyserRef.current.clear();
+
     setState({
       ...initialState,
       error,

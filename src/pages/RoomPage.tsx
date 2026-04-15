@@ -53,6 +53,20 @@ const getFullscreenToggleError = (error: unknown): string => {
   return error instanceof Error ? error.message : "Failed to toggle fullscreen";
 };
 
+const getSpeakingTileClasses = (isSpeaking: boolean): string => {
+  return isSpeaking
+    ? "ring-4 ring-emerald-400 border-2 border-emerald-300 shadow-[0_0_0_2px_rgba(52,211,153,0.75),0_0_28px_rgba(52,211,153,0.45)]"
+    : "";
+};
+
+const isParticipantHighlighted = (
+  participant: RoomVoiceParticipantState,
+  liveIdentity: string | undefined,
+  activeIds: Set<string>
+): boolean => {
+  return activeIds.has(participant.user_id) || activeIds.has(participant.username) || Boolean(liveIdentity && activeIds.has(liveIdentity));
+};
+
 const ControlButton: React.FC<ControlButtonProps> = ({
   icon,
   activeIcon,
@@ -109,6 +123,7 @@ const VoiceTile: React.FC<{
   isFocused?: boolean;
   canFocus?: boolean;
   canFullscreen?: boolean;
+  isSpeaking?: boolean;
   onFocusToggle?: () => void;
   onFullscreenError?: (message: string) => void;
   onSelect?: () => void;
@@ -122,6 +137,7 @@ const VoiceTile: React.FC<{
   isFocused = false,
   canFocus = false,
   canFullscreen = false,
+  isSpeaking = false,
   onFocusToggle,
   onFullscreenError,
   onSelect,
@@ -205,7 +221,7 @@ const VoiceTile: React.FC<{
     <div
       ref={containerRef}
       onClick={onSelect}
-      className={`relative overflow-hidden rounded-xl bg-gray-800 shadow-lg ${
+      className={`relative overflow-hidden rounded-xl bg-gray-800 shadow-lg ${getSpeakingTileClasses(isSpeaking)} ${
         className ?? "aspect-video"
       } ${onSelect ? "cursor-pointer" : ""}`}
     >
@@ -289,6 +305,7 @@ const ScreenShareTile: React.FC<{
   isFocused?: boolean;
   canFocus?: boolean;
   canFullscreen?: boolean;
+  isSpeaking?: boolean;
   onFocusToggle?: () => void;
   onFullscreenError?: (message: string) => void;
   onSelect?: () => void;
@@ -299,6 +316,7 @@ const ScreenShareTile: React.FC<{
   isFocused = false,
   canFocus = true,
   canFullscreen = true,
+  isSpeaking = false,
   onFocusToggle,
   onFullscreenError,
   onSelect,
@@ -364,7 +382,7 @@ const ScreenShareTile: React.FC<{
     <div
       ref={containerRef}
       onClick={onSelect}
-      className={`relative overflow-hidden rounded-xl bg-gray-950 shadow-lg ring-1 ring-blue-400/40 ${
+      className={`relative overflow-hidden rounded-xl bg-gray-950 shadow-lg ring-1 ring-blue-400/40 ${getSpeakingTileClasses(isSpeaking)} ${
         className ?? "aspect-video"
       } ${onSelect ? "cursor-pointer" : ""}`}
     >
@@ -607,6 +625,8 @@ export default function RoomPage(): JSX.Element {
   const focusedTile = focusedTileId
     ? visualTiles.find((tile) => tile.id === focusedTileId) ?? null
     : null;
+  const activeSpeakerIds = new Set(roomVoiceState.activeSpeakerIds);
+  const activeScreenShareSpeakerIds = new Set(roomVoiceState.activeScreenShareSpeakerIds);
   const focusStripTiles = focusedTile
     ? [
         ...displayedVoiceParticipants
@@ -827,6 +847,11 @@ export default function RoomPage(): JSX.Element {
                       isFocused
                       canFocus
                       canFullscreen
+                      isSpeaking={isParticipantHighlighted(
+                        focusedTile.participant,
+                        liveParticipantsByUserId.get(focusedTile.participant.user_id)?.identity,
+                        activeSpeakerIds
+                      )}
                       onFocusToggle={() => setFocusedTileId(null)}
                       onFullscreenError={setError}
                     />
@@ -838,6 +863,11 @@ export default function RoomPage(): JSX.Element {
                       isFocused
                       canFocus
                       canFullscreen
+                      isSpeaking={isParticipantHighlighted(
+                        focusedTile.participant,
+                        liveParticipantsByUserId.get(focusedTile.participant.user_id)?.identity,
+                        activeScreenShareSpeakerIds
+                      )}
                       onFocusToggle={() => setFocusedTileId(null)}
                       onFullscreenError={setError}
                     />
@@ -859,6 +889,11 @@ export default function RoomPage(): JSX.Element {
                     {focusStripTiles.map((tile) => {
                       if (tile.kind === "participant") {
                         const liveParticipant = liveParticipantsByUserId.get(tile.participant.user_id);
+                        const isSpeaking = isParticipantHighlighted(
+                          tile.participant,
+                          liveParticipant?.identity,
+                          activeSpeakerIds
+                        );
                         return (
                           <div key={`participant-strip:${tile.participant.user_id}`} className="w-72 shrink-0">
                             <VoiceTile
@@ -872,6 +907,7 @@ export default function RoomPage(): JSX.Element {
                               }
                               audioTrack={liveParticipant?.audioTrack}
                               className="aspect-video"
+                              isSpeaking={isSpeaking}
                               canFocus={Boolean(
                                 (tile.participant.user_id === user?.user_id
                                   ? localVideoTrack ?? liveParticipant?.cameraTrack
@@ -907,6 +943,11 @@ export default function RoomPage(): JSX.Element {
                             className="aspect-video"
                             canFocus
                             canFullscreen
+                            isSpeaking={isParticipantHighlighted(
+                              tile.participant,
+                              liveParticipantsByUserId.get(tile.participant.user_id)?.identity,
+                              activeScreenShareSpeakerIds
+                            )}
                             onFocusToggle={() => setFocusedTileId(`screen-share:${tile.participant.user_id}`)}
                             onSelect={() => setFocusedTileId(`screen-share:${tile.participant.user_id}`)}
                             onFullscreenError={setError}
@@ -931,6 +972,11 @@ export default function RoomPage(): JSX.Element {
                         : liveParticipantsByUserId.get(participant.user_id)?.cameraTrack
                     }
                     audioTrack={liveParticipantsByUserId.get(participant.user_id)?.audioTrack}
+                    isSpeaking={isParticipantHighlighted(
+                      participant,
+                      liveParticipantsByUserId.get(participant.user_id)?.identity,
+                      activeSpeakerIds
+                    )}
                     canFocus={Boolean(
                       (participant.user_id === user?.user_id
                         ? localVideoTrack ?? liveParticipantsByUserId.get(participant.user_id)?.cameraTrack
@@ -960,6 +1006,11 @@ export default function RoomPage(): JSX.Element {
                     key={`${participant.user_id}-screen-share`}
                     participant={participant}
                     screenShareTrack={screenShareTrack}
+                    isSpeaking={isParticipantHighlighted(
+                      participant,
+                      liveParticipantsByUserId.get(participant.user_id)?.identity,
+                      activeScreenShareSpeakerIds
+                    )}
                     canFocus
                     canFullscreen
                     onFocusToggle={() => setFocusedTileId(`screen-share:${participant.user_id}`)}

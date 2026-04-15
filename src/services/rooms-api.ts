@@ -204,7 +204,7 @@ export async function fetchRoomVoiceCredentials(
   token: string
 ): Promise<RoomVoiceCredentialsResponse> {
   const response = await fetch(`${API_BASE_URL}/rooms/${roomID}/voice/credentials`, {
-    method: "GET",
+    method: "POST",
     headers: headers(token),
   });
   if (!response.ok) {
