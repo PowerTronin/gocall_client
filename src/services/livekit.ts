@@ -93,6 +93,7 @@ export class LiveKitClient {
   private localVideoTrack: LocalVideoTrack | null = null;
   private localAudioTrack: LocalAudioTrack | null = null;
   private screenShareTrack: LocalVideoTrack | null = null;
+  private screenShareAudioTrack: LocalAudioTrack | null = null;
   private isMicMuted = false;
   private isCameraMuted = false;
   private isScreenSharing = false;
@@ -401,12 +402,24 @@ export class LiveKitClient {
 
     try {
       this.ensureMediaDevicesAvailable('screen share');
-      const publication = await this.room.localParticipant.setScreenShareEnabled(true);
+      const publication = await this.room.localParticipant.setScreenShareEnabled(true, {
+        audio: {
+          autoGainControl: false,
+          echoCancellation: false,
+          noiseSuppression: false,
+        },
+        systemAudio: 'include',
+        surfaceSwitching: 'include',
+        suppressLocalAudioPlayback: false,
+      });
       const publicationTrack = publication?.track as LocalVideoTrack | undefined;
       const fallbackTrack = this.room.localParticipant.getTrackPublication(Track.Source.ScreenShare)
         ?.track as LocalVideoTrack | undefined;
+      const screenAudioTrack = this.room.localParticipant.getTrackPublication(Track.Source.ScreenShareAudio)
+        ?.track as LocalAudioTrack | undefined;
 
       this.screenShareTrack = publicationTrack || fallbackTrack || null;
+      this.screenShareAudioTrack = screenAudioTrack || null;
       this.isScreenSharing = true;
       this.handlers.onScreenShareStarted?.();
     } catch (err) {
@@ -422,6 +435,7 @@ export class LiveKitClient {
 
     await this.room.localParticipant.setScreenShareEnabled(false);
     this.screenShareTrack = null;
+    this.screenShareAudioTrack = null;
     this.isScreenSharing = false;
     this.handlers.onScreenShareStopped?.();
   }
@@ -508,6 +522,17 @@ export class LiveKitClient {
       ?.track as LocalVideoTrack | undefined;
 
     return screenTrack || this.screenShareTrack;
+  }
+
+  getScreenShareAudioTrack(): LocalAudioTrack | null {
+    if (!this.room) {
+      return this.screenShareAudioTrack;
+    }
+
+    const screenAudioTrack = this.room.localParticipant.getTrackPublication(Track.Source.ScreenShareAudio)
+      ?.track as LocalAudioTrack | undefined;
+
+    return screenAudioTrack || this.screenShareAudioTrack;
   }
 
   isMicEnabled(): boolean {

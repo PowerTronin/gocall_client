@@ -47,6 +47,7 @@ interface VisualTile {
   kind: "camera" | "screen-share";
   participant: RoomVoiceParticipantState;
   track: Track;
+  audioTrack?: Track;
 }
 
 const getFullscreenToggleError = (error: unknown): string => {
@@ -301,6 +302,8 @@ const VoiceTile: React.FC<{
 const ScreenShareTile: React.FC<{
   participant: RoomVoiceParticipantState;
   screenShareTrack?: Track;
+  screenShareAudioTrack?: Track;
+  isCurrentUser?: boolean;
   className?: string;
   isFocused?: boolean;
   canFocus?: boolean;
@@ -312,6 +315,8 @@ const ScreenShareTile: React.FC<{
 }> = ({
   participant,
   screenShareTrack,
+  screenShareAudioTrack,
+  isCurrentUser = false,
   className,
   isFocused = false,
   canFocus = true,
@@ -323,6 +328,7 @@ const ScreenShareTile: React.FC<{
 }) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
+  const audioRef = useRef<HTMLAudioElement>(null);
   const [isFullscreen, setIsFullscreen] = useState(false);
 
   useEffect(() => {
@@ -337,6 +343,19 @@ const ScreenShareTile: React.FC<{
       track.detach(videoRef.current!);
     };
   }, [screenShareTrack]);
+
+  useEffect(() => {
+    if (isCurrentUser || !audioRef.current || !screenShareAudioTrack) {
+      return undefined;
+    }
+
+    const track = screenShareAudioTrack as AudioTrack;
+    track.attach(audioRef.current);
+
+    return () => {
+      track.detach(audioRef.current!);
+    };
+  }, [screenShareAudioTrack, isCurrentUser]);
 
   useEffect(() => {
     const handleFullscreenChange = () => {
@@ -393,6 +412,7 @@ const ScreenShareTile: React.FC<{
         muted
         className="w-full h-full object-contain bg-black"
       />
+      {!isCurrentUser && <audio ref={audioRef} autoPlay />}
 
       {(canFocus || canFullscreen) && (
         <div className="absolute left-3 top-3 z-10 flex items-center gap-2">
@@ -573,6 +593,7 @@ export default function RoomPage(): JSX.Element {
             participant.user_id === user?.user_id
               ? localScreenShareTrack ?? liveParticipant?.screenShareTrack
               : liveParticipant?.screenShareTrack;
+          const screenShareAudioTrack = liveParticipant?.screenShareAudioTrack;
 
           if (!screenShareTrack) {
             return null;
@@ -581,6 +602,7 @@ export default function RoomPage(): JSX.Element {
           return {
             participant,
             screenShareTrack,
+            screenShareAudioTrack,
           };
         })
         .filter(
@@ -589,6 +611,7 @@ export default function RoomPage(): JSX.Element {
           ): tile is {
             participant: RoomVoiceParticipantState;
             screenShareTrack: Track;
+            screenShareAudioTrack: Track | undefined;
           } => tile !== null
         ),
     [displayedVoiceParticipants, liveParticipantsByUserId, localScreenShareTrack, user?.user_id]
@@ -613,11 +636,12 @@ export default function RoomPage(): JSX.Element {
           track: cameraTrack,
         }];
       }),
-      ...screenShareTiles.map(({ participant, screenShareTrack }) => ({
+      ...screenShareTiles.map(({ participant, screenShareTrack, screenShareAudioTrack }) => ({
         id: `screen-share:${participant.user_id}`,
         kind: "screen-share" as const,
         participant,
         track: screenShareTrack,
+        audioTrack: screenShareAudioTrack,
       })),
     ],
     [displayedVoiceParticipants, liveParticipantsByUserId, localVideoTrack, screenShareTiles, user?.user_id]
@@ -634,10 +658,11 @@ export default function RoomPage(): JSX.Element {
           .map((participant) => ({ kind: "participant" as const, participant })),
         ...screenShareTiles
           .filter(({ participant }) => `screen-share:${participant.user_id}` !== focusedTile.id)
-          .map(({ participant, screenShareTrack }) => ({
+          .map(({ participant, screenShareTrack, screenShareAudioTrack }) => ({
             kind: "screen-share" as const,
             participant,
             screenShareTrack,
+            screenShareAudioTrack,
           })),
       ]
     : [];
@@ -859,6 +884,8 @@ export default function RoomPage(): JSX.Element {
                     <ScreenShareTile
                       participant={focusedTile.participant}
                       screenShareTrack={focusedTile.track}
+                      screenShareAudioTrack={focusedTile.audioTrack}
+                      isCurrentUser={focusedTile.participant.user_id === user?.user_id}
                       className="h-full min-h-[22rem]"
                       isFocused
                       canFocus
@@ -940,6 +967,8 @@ export default function RoomPage(): JSX.Element {
                           <ScreenShareTile
                             participant={tile.participant}
                             screenShareTrack={tile.screenShareTrack}
+                            screenShareAudioTrack={tile.screenShareAudioTrack}
+                            isCurrentUser={tile.participant.user_id === user?.user_id}
                             className="aspect-video"
                             canFocus
                             canFullscreen
@@ -1001,11 +1030,13 @@ export default function RoomPage(): JSX.Element {
                     onFullscreenError={setError}
                   />
                 ))}
-                {screenShareTiles.map(({ participant, screenShareTrack }) => (
+                {screenShareTiles.map(({ participant, screenShareTrack, screenShareAudioTrack }) => (
                   <ScreenShareTile
                     key={`${participant.user_id}-screen-share`}
                     participant={participant}
                     screenShareTrack={screenShareTrack}
+                    screenShareAudioTrack={screenShareAudioTrack}
+                    isCurrentUser={participant.user_id === user?.user_id}
                     isSpeaking={isParticipantHighlighted(
                       participant,
                       liveParticipantsByUserId.get(participant.user_id)?.identity,
