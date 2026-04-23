@@ -590,13 +590,18 @@ export default function RoomPage(): JSX.Element {
       displayedVoiceParticipants
         .map((participant) => {
           const liveParticipant = liveParticipantsByUserId.get(participant.user_id);
+          const isLocalParticipant = participant.user_id === user?.user_id;
+          const isActivelySharing =
+            isLocalParticipant && isCurrentRoomSession
+              ? roomVoiceState.screenSharing
+              : participant.is_screen_sharing;
           const screenShareTrack =
-            participant.user_id === user?.user_id
+            isLocalParticipant
               ? localScreenShareTrack ?? liveParticipant?.screenShareTrack
               : liveParticipant?.screenShareTrack;
           const screenShareAudioTrack = liveParticipant?.screenShareAudioTrack;
 
-          if (!screenShareTrack) {
+          if (!isActivelySharing || !screenShareTrack) {
             return null;
           }
 
@@ -615,7 +620,14 @@ export default function RoomPage(): JSX.Element {
             screenShareAudioTrack: Track | undefined;
           } => tile !== null
         ),
-    [displayedVoiceParticipants, liveParticipantsByUserId, localScreenShareTrack, user?.user_id]
+    [
+      displayedVoiceParticipants,
+      isCurrentRoomSession,
+      liveParticipantsByUserId,
+      localScreenShareTrack,
+      roomVoiceState.screenSharing,
+      user?.user_id,
+    ]
   );
   const visualTiles = useMemo<VisualTile[]>(
     () => [
@@ -1129,18 +1141,18 @@ export default function RoomPage(): JSX.Element {
             className="flex items-center justify-center gap-4 p-4 bg-gray-800 border-t border-gray-700"
           >
             <ControlButton
-              icon={<MicOff className="w-5 h-5 text-red-400" />}
-              activeIcon={<Mic className="w-5 h-5 text-white" />}
-              isActive={isCurrentRoomSession ? roomVoiceState.localMuted : !myVoiceState?.is_mic_enabled}
+              icon={<Mic className="w-5 h-5 text-white" />}
+              activeIcon={<MicOff className="w-5 h-5 text-red-400" />}
+              isActive={isCurrentRoomSession ? !roomVoiceState.localMuted : Boolean(myVoiceState?.is_mic_enabled)}
               disabled={!canToggleMedia}
               onClick={() => void handleToggleMic()}
               label={isCurrentRoomSession && roomVoiceState.localMuted ? "Unmute" : "Mute"}
             />
 
             <ControlButton
-              icon={<VideoOff className="w-5 h-5 text-red-400" />}
-              activeIcon={<Video className="w-5 h-5 text-white" />}
-              isActive={isCurrentRoomSession ? roomVoiceState.localCameraOff : !myVoiceState?.is_camera_enabled}
+              icon={<Video className="w-5 h-5 text-white" />}
+              activeIcon={<VideoOff className="w-5 h-5 text-red-400" />}
+              isActive={isCurrentRoomSession ? !roomVoiceState.localCameraOff : Boolean(myVoiceState?.is_camera_enabled)}
               disabled={!canToggleMedia}
               onClick={() => void handleToggleCamera()}
               label={
@@ -1151,9 +1163,9 @@ export default function RoomPage(): JSX.Element {
             />
 
             <ControlButton
-              icon={<MonitorOff className="w-5 h-5 text-red-400" />}
-              activeIcon={<Monitor className="w-5 h-5 text-white" />}
-              isActive={!(isCurrentRoomSession ? roomVoiceState.screenSharing : Boolean(myVoiceState?.is_screen_sharing))}
+              icon={<Monitor className="w-5 h-5 text-white" />}
+              activeIcon={<MonitorOff className="w-5 h-5 text-red-400" />}
+              isActive={isCurrentRoomSession ? roomVoiceState.screenSharing : Boolean(myVoiceState?.is_screen_sharing)}
               disabled={!canToggleMedia}
               onClick={() => void handleToggleScreenShare()}
               label={

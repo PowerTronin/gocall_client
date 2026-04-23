@@ -96,8 +96,8 @@ export class LiveKitClient {
   private screenShareTrack: LocalVideoTrack | null = null;
   private screenShareAudioTrack: LocalAudioTrack | null = null;
   private screenShareStopCleanup: (() => void) | null = null;
-  private isMicMuted = false;
-  private isCameraMuted = false;
+  private isMicMuted = true;
+  private isCameraMuted = true;
   private isScreenSharing = false;
 
   private ensureMediaDevicesAvailable(feature: 'microphone' | 'camera' | 'screen share'): void {
@@ -595,15 +595,15 @@ export class LiveKitClient {
   }
 
   isMicEnabled(): boolean {
-    return !this.isMicMuted;
+    return Boolean(this.getLocalAudioTrack()) && !this.isMicMuted;
   }
 
   isCameraEnabled(): boolean {
-    return !this.isCameraMuted;
+    return Boolean(this.getLocalVideoTrack()) && !this.isCameraMuted;
   }
 
   isScreenShareEnabled(): boolean {
-    return this.isScreenSharing;
+    return Boolean(this.getScreenShareTrack()) && this.isScreenSharing;
   }
 
   isConnected(): boolean {
