@@ -479,6 +479,7 @@ export default function RoomPage(): JSX.Element {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [focusedTileId, setFocusedTileId] = useState<string | null>(null);
+  const autoRejoinAttemptRef = useRef<string | null>(null);
 
   const getRoomDisplayName = useCallback(
     (rawName: string, membersList: RoomStateResponse["members"]) => {
@@ -668,6 +669,52 @@ export default function RoomPage(): JSX.Element {
     : [];
 
   const canToggleMedia = isCurrentRoomSession && roomVoiceState.status === "active" && !isSubmitting;
+
+  useEffect(() => {
+    if (
+      !roomState?.in_voice ||
+      !token ||
+      !roomIdentifier ||
+      isCurrentRoomSession ||
+      roomVoiceState.status !== "idle" ||
+      autoRejoinAttemptRef.current === roomIdentifier
+    ) {
+      return undefined;
+    }
+
+    let cancelled = false;
+    autoRejoinAttemptRef.current = roomIdentifier;
+
+    const reconnectVoice = async () => {
+      try {
+        await joinRoomVoiceSession(roomIdentifier, roomName || routeRoomName || roomIdentifier);
+        if (!cancelled) {
+          await loadRoomState();
+        }
+      } catch (err) {
+        if (!cancelled) {
+          autoRejoinAttemptRef.current = null;
+          setError(err instanceof Error ? err.message : "Failed to reconnect room voice");
+        }
+      }
+    };
+
+    void reconnectVoice();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    isCurrentRoomSession,
+    joinRoomVoiceSession,
+    loadRoomState,
+    roomIdentifier,
+    roomName,
+    roomState?.in_voice,
+    roomVoiceState.status,
+    routeRoomName,
+    token,
+  ]);
 
   useEffect(() => {
     if (!focusedTileId) {

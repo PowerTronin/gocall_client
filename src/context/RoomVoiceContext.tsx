@@ -397,6 +397,25 @@ export const RoomVoiceProvider: React.FC<{ children: React.ReactNode }> = ({
     resetState(leaveError);
   }, [handleSessionFailure, isSessionError, resetState, state.roomId, token]);
 
+  const syncMediaState = useCallback(
+    async (
+      patch: {
+        is_mic_enabled?: boolean;
+        is_camera_enabled?: boolean;
+        is_screen_sharing?: boolean;
+      },
+      roomIdOverride?: string
+    ) => {
+      const roomId = roomIdOverride ?? state.roomId;
+      if (!token || !roomId) {
+        return;
+      }
+
+      await updateRoomVoiceMedia(roomId, patch, token);
+    },
+    [state.roomId, token]
+  );
+
   const joinRoomVoiceSession = useCallback(
     async (roomId: string, roomName?: string) => {
       if (!token) {
@@ -468,6 +487,9 @@ export const RoomVoiceProvider: React.FC<{ children: React.ReactNode }> = ({
           },
           onScreenShareStopped: () => {
             setState((current) => ({ ...current, screenSharing: false }));
+            void syncMediaState({ is_screen_sharing: false }, roomId).catch((error) => {
+              console.warn("[RoomVoiceContext] Failed to sync stopped screen share:", error);
+            });
             syncParticipants();
           },
           onError: (error) => {
@@ -496,22 +518,7 @@ export const RoomVoiceProvider: React.FC<{ children: React.ReactNode }> = ({
         resetState(message);
       }
     },
-    [handleSessionFailure, isSessionError, leaveRoomVoiceSession, resetState, state.roomId, syncParticipants, token]
-  );
-
-  const syncMediaState = useCallback(
-    async (patch: {
-      is_mic_enabled?: boolean;
-      is_camera_enabled?: boolean;
-      is_screen_sharing?: boolean;
-    }) => {
-      if (!token || !state.roomId) {
-        return;
-      }
-
-      await updateRoomVoiceMedia(state.roomId, patch, token);
-    },
-    [state.roomId, token]
+    [handleSessionFailure, isSessionError, leaveRoomVoiceSession, resetState, state.roomId, syncMediaState, syncParticipants, token]
   );
 
   const toggleRoomVoiceMic = useCallback(async () => {

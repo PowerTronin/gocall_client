@@ -7,6 +7,7 @@ import {
   Room,
   RoomEvent,
   Track,
+  TrackEvent,
   TrackPublication,
   LocalTrack,
   RemoteTrack,
@@ -94,6 +95,7 @@ export class LiveKitClient {
   private localAudioTrack: LocalAudioTrack | null = null;
   private screenShareTrack: LocalVideoTrack | null = null;
   private screenShareAudioTrack: LocalAudioTrack | null = null;
+  private screenShareStopCleanup: (() => void) | null = null;
   private isMicMuted = false;
   private isCameraMuted = false;
   private isScreenSharing = false;
@@ -222,6 +224,12 @@ export class LiveKitClient {
     });
 
     this.room.on(RoomEvent.LocalTrackUnpublished, (publication, participant) => {
+      if (publication.source === Track.Source.ScreenShare) {
+        this.clearScreenShareState(true);
+      } else if (publication.source === Track.Source.ScreenShareAudio) {
+        this.screenShareAudioTrack = null;
+      }
+
       if (publication.track) {
         const trackInfo = this.createTrackInfo(publication.track, participant, true);
         this.handlers.onLocalTrackUnpublished?.(trackInfo);
@@ -311,6 +319,54 @@ export class LiveKitClient {
   private handleError(error: Error): void {
     console.error('LiveKit error:', error);
     this.handlers.onError?.(error);
+  }
+
+  private clearScreenShareState(notify: boolean): void {
+    const wasScreenSharing =
+      this.isScreenSharing || Boolean(this.screenShareTrack) || Boolean(this.screenShareAudioTrack);
+
+    if (this.screenShareStopCleanup) {
+      this.screenShareStopCleanup();
+      this.screenShareStopCleanup = null;
+    }
+
+    this.screenShareTrack = null;
+    this.screenShareAudioTrack = null;
+    this.isScreenSharing = false;
+
+    if (notify && wasScreenSharing) {
+      this.handlers.onScreenShareStopped?.();
+    }
+  }
+
+  private bindScreenShareEndedListeners(
+    videoTrack: LocalVideoTrack | null,
+    audioTrack: LocalAudioTrack | null
+  ): void {
+    if (this.screenShareStopCleanup) {
+      this.screenShareStopCleanup();
+      this.screenShareStopCleanup = null;
+    }
+
+    const handleEnded = () => {
+      this.clearScreenShareState(true);
+    };
+
+    const tracks = [videoTrack, audioTrack].filter(
+      (track): track is LocalVideoTrack | LocalAudioTrack => Boolean(track)
+    );
+
+    tracks.forEach((track) => {
+      track.on(TrackEvent.Ended, handleEnded);
+      track.mediaStreamTrack.addEventListener('ended', handleEnded);
+    });
+
+    this.screenShareStopCleanup = () => {
+      tracks.forEach((track) => {
+        track.off(TrackEvent.Ended, handleEnded);
+        track.mediaStreamTrack.removeEventListener('ended', handleEnded);
+      });
+    };
   }
 
   // === Media Controls ===
@@ -420,6 +476,7 @@ export class LiveKitClient {
 
       this.screenShareTrack = publicationTrack || fallbackTrack || null;
       this.screenShareAudioTrack = screenAudioTrack || null;
+      this.bindScreenShareEndedListeners(this.screenShareTrack, this.screenShareAudioTrack);
       this.isScreenSharing = true;
       this.handlers.onScreenShareStarted?.();
     } catch (err) {
@@ -429,15 +486,17 @@ export class LiveKitClient {
   }
 
   async stopScreenShare(): Promise<void> {
-    if (!this.room || !this.isScreenSharing) {
+    if (!this.room) {
+      this.clearScreenShareState(false);
+      return;
+    }
+
+    if (!this.isScreenSharing && !this.screenShareTrack && !this.screenShareAudioTrack) {
       return;
     }
 
     await this.room.localParticipant.setScreenShareEnabled(false);
-    this.screenShareTrack = null;
-    this.screenShareAudioTrack = null;
-    this.isScreenSharing = false;
-    this.handlers.onScreenShareStopped?.();
+    this.clearScreenShareState(true);
   }
 
   async toggleScreenShare(): Promise<boolean> {
