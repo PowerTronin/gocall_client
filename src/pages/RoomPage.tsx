@@ -8,6 +8,7 @@ import {
   Minimize2,
   Monitor,
   MonitorOff,
+  Pin,
   PhoneOff,
   Radio,
   Video,
@@ -15,6 +16,7 @@ import {
 } from "lucide-react";
 import { AudioTrack, Track, VideoTrack } from "livekit-client";
 
+import { getStageLayoutPreference, type StageLayoutPreference } from "../app-preferences";
 import { useAuth } from "../context/AuthContext";
 import { useRoomVoice } from "../context/RoomVoiceContext";
 import {
@@ -22,6 +24,8 @@ import {
   joinRoomAsMember,
   RoomStateResponse,
   RoomVoiceParticipantState,
+  updateRoomSharedStageLayout,
+  updateRoomSharedStageLayoutLock,
 } from "../services/rooms-api";
 interface ControlButtonProps {
   icon: React.ReactNode;
@@ -36,7 +40,9 @@ interface ControlButtonProps {
 interface TileActionButtonProps {
   label: string;
   onClick: () => void;
-  icon?: React.ReactNode;
+  icon: React.ReactNode;
+  isActive?: boolean;
+  disabled?: boolean;
 }
 
 interface VisualTile {
@@ -47,8 +53,284 @@ interface VisualTile {
   audioTrack?: Track;
 }
 
+type RoomLayoutMode = "grid" | "stage";
+
+interface StageTileLayout {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  z: number;
+}
+
+type StageLayoutMap = Record<string, StageTileLayout>;
+
+interface StageViewportOffset {
+  x: number;
+  y: number;
+}
+
+interface StageStorageState {
+  layoutMode?: RoomLayoutMode;
+  personalStageLayouts?: StageLayoutMap;
+  personalPinnedTileIds?: string[];
+  stageLayouts?: StageLayoutMap;
+  pinnedTileIds?: string[];
+  showStageGrid?: boolean;
+  stageViewOffset?: StageViewportOffset;
+  stageZoom?: number;
+}
+
 const shellClass = "border-2 border-[var(--pc-border)] bg-[var(--pc-bg)]";
 const monoMetaClass = "font-mono text-[10px] uppercase tracking-[0.24em] text-[var(--pc-text-muted)]";
+const defaultStageSize = { width: 2200, height: 1400 };
+const defaultStageViewportSize = { width: 1280, height: 720 };
+const stageGridSize = 20;
+const minStageZoom = 0.6;
+const maxStageZoom = 1.6;
+
+const getStageStorageKey = (roomIdentifier: string) => `power-call:room-layout:${roomIdentifier}`;
+
+const clamp = (value: number, min: number, max: number) => Math.min(Math.max(value, min), max);
+
+const clampStageViewOffset = (
+  offset: StageViewportOffset,
+  stageSize: { width: number; height: number },
+  viewportSize: { width: number; height: number },
+  zoom = 1
+): StageViewportOffset => {
+  const scaledWidth = stageSize.width * zoom;
+  const scaledHeight = stageSize.height * zoom;
+  const minX = Math.min(viewportSize.width - scaledWidth, 0);
+  const minY = Math.min(viewportSize.height - scaledHeight, 0);
+
+  return {
+    x: clamp(offset.x, minX, 0),
+    y: clamp(offset.y, minY, 0),
+  };
+};
+
+const getCenteredStageViewOffset = (
+  stageSize: { width: number; height: number },
+  viewportSize: { width: number; height: number },
+  zoom = 1
+): StageViewportOffset =>
+  clampStageViewOffset(
+    {
+      x: Math.round((viewportSize.width - stageSize.width * zoom) / 2),
+      y: Math.round((viewportSize.height - stageSize.height * zoom) / 2),
+    },
+    stageSize,
+    viewportSize,
+    zoom
+  );
+
+const snapValue = (value: number, targets: number[], threshold = 10) => {
+  for (const target of targets) {
+    if (Math.abs(value - target) <= threshold) {
+      return target;
+    }
+  }
+
+  return value;
+};
+
+const snapToGrid = (value: number, gridSize: number) => Math.round(value / gridSize) * gridSize;
+
+const areStageLayoutsEqual = (left: StageLayoutMap, right: StageLayoutMap): boolean => {
+  const leftKeys = Object.keys(left);
+  const rightKeys = Object.keys(right);
+  if (leftKeys.length !== rightKeys.length) {
+    return false;
+  }
+
+  return leftKeys.every((key) => {
+    const leftLayout = left[key];
+    const rightLayout = right[key];
+    return (
+      Boolean(leftLayout) &&
+      Boolean(rightLayout) &&
+      leftLayout.x === rightLayout.x &&
+      leftLayout.y === rightLayout.y &&
+      leftLayout.w === rightLayout.w &&
+      leftLayout.h === rightLayout.h &&
+      leftLayout.z === rightLayout.z
+    );
+  });
+};
+
+const areStringArraysEqual = (left: string[], right: string[]): boolean => {
+  if (left.length !== right.length) {
+    return false;
+  }
+
+  return left.every((value, index) => value === right[index]);
+};
+
+const clampStageLayout = (
+  layout: StageTileLayout,
+  stageSize: { width: number; height: number }
+): StageTileLayout => {
+  const maxX = Math.max(stageSize.width - layout.w, 0);
+  const maxY = Math.max(stageSize.height - layout.h, 0);
+
+  return {
+    ...layout,
+    x: clamp(layout.x, 0, maxX),
+    y: clamp(layout.y, 0, maxY),
+  };
+};
+
+const snapStageLayout = (
+  layout: StageTileLayout,
+  stageSize: { width: number; height: number },
+  options?: { enabled?: boolean; snapWidth?: boolean; snapHeight?: boolean }
+): StageTileLayout => {
+  const clampedLayout = clampStageLayout(layout, stageSize);
+  if (options?.enabled === false) {
+    return clampedLayout;
+  }
+  const maxX = Math.max(stageSize.width - clampedLayout.w, 0);
+  const maxY = Math.max(stageSize.height - clampedLayout.h, 0);
+
+  const snappedX = snapValue(
+    snapToGrid(clampedLayout.x, stageGridSize),
+    [0, maxX],
+    12
+  );
+  const snappedY = snapValue(
+    snapToGrid(clampedLayout.y, stageGridSize),
+    [0, maxY],
+    12
+  );
+  const snappedW = options?.snapWidth ? snapToGrid(clampedLayout.w, stageGridSize) : clampedLayout.w;
+  const snappedH = options?.snapHeight ? snapToGrid(clampedLayout.h, stageGridSize) : clampedLayout.h;
+
+  return clampStageLayout(
+    {
+      ...clampedLayout,
+      x: snappedX,
+      y: snappedY,
+      w: snappedW,
+      h: snappedH,
+    },
+    stageSize
+  );
+};
+
+const getDefaultStageTileLayout = (
+  tile: {
+    id: string;
+    kind: "camera" | "screen-share";
+    participant: RoomVoiceParticipantState;
+  },
+  visualTiles: Array<{
+    id: string;
+    kind: "camera" | "screen-share";
+    participant: RoomVoiceParticipantState;
+  }>,
+  stageSize: { width: number; height: number }
+): StageTileLayout => {
+  const margin = 32;
+  const gap = 20;
+  const screenShareTiles = visualTiles.filter((visualTile) => visualTile.kind === "screen-share");
+  const cameraTiles = visualTiles.filter((visualTile) => visualTile.kind === "camera");
+  const screenShareIndex = screenShareTiles.findIndex((visualTile) => visualTile.id === tile.id);
+  const cameraIndex = cameraTiles.findIndex((visualTile) => visualTile.id === tile.id);
+
+  if (tile.kind === "screen-share") {
+    const w = Math.min(840, Math.max(560, Math.floor(stageSize.width * 0.62)));
+    const h = Math.round(w * 9 / 16);
+    return clampStageLayout(
+      {
+        x: margin + screenShareIndex * 28,
+        y: margin + screenShareIndex * 28,
+        w,
+        h,
+        z: 100 + screenShareIndex,
+      },
+      stageSize
+    );
+  }
+
+  const hasVideo = Boolean(tile.participant.is_camera_enabled);
+  const w = hasVideo ? 280 : 220;
+  const h = hasVideo ? 350 : 220;
+  const hasScreenShare = screenShareTiles.length > 0;
+
+  let baseX = margin;
+  let baseY = margin;
+
+  if (hasScreenShare) {
+    const rightRailSlots = 2;
+    const rightRailX = Math.max(stageSize.width - w - margin, margin);
+
+    if (cameraIndex < rightRailSlots) {
+      baseX = rightRailX;
+      baseY = margin + cameraIndex * (h + gap);
+    } else {
+      const stripIndex = cameraIndex - rightRailSlots;
+      const usableWidth = Math.max(stageSize.width - margin * 2 - gap - (w + gap), w);
+      const columns = Math.max(1, Math.floor((usableWidth + gap) / (w + gap)));
+      const column = stripIndex % columns;
+      const row = Math.floor(stripIndex / columns);
+      baseX = margin + column * (w + gap);
+      baseY = Math.max(stageSize.height - margin - h - row * (h + gap), margin);
+    }
+  } else {
+    const usableWidth = Math.max(stageSize.width - margin * 2, w);
+    const columns = Math.max(1, Math.floor((usableWidth + gap) / (w + gap)));
+    const column = cameraIndex % columns;
+    const row = Math.floor(cameraIndex / columns);
+    baseX = margin + column * (w + gap);
+    baseY = margin + row * (h + gap);
+  }
+
+  return clampStageLayout(
+    {
+      x: baseX,
+      y: baseY,
+      w,
+      h,
+      z: 10 + cameraIndex,
+    },
+    stageSize
+  );
+};
+
+const getStageTileAspectRatio = (tileKind: "camera" | "screen-share", hasVisual?: boolean) => {
+  if (tileKind === "screen-share") {
+    return 16 / 9;
+  }
+
+  return hasVisual ? 4 / 5 : 1;
+};
+
+const orderStageTiles = <
+  T extends {
+    id: string;
+    kind: "camera" | "screen-share";
+  },
+>(
+  tiles: T[],
+  pinnedTileIds: string[]
+) => {
+  const pinnedSet = new Set(pinnedTileIds);
+
+  return [...tiles].sort((left, right) => {
+    const pinDelta = Number(pinnedSet.has(right.id)) - Number(pinnedSet.has(left.id));
+    if (pinDelta !== 0) {
+      return pinDelta;
+    }
+
+    const kindDelta = Number(left.kind === "screen-share") - Number(right.kind === "screen-share");
+    if (kindDelta !== 0) {
+      return kindDelta;
+    }
+
+    return left.id.localeCompare(right.id);
+  });
+};
 
 const getFullscreenToggleError = (error: unknown): string => {
   return error instanceof Error ? error.message : "Failed to toggle fullscreen";
@@ -163,7 +445,13 @@ const ControlButton: React.FC<ControlButtonProps> = ({
   );
 };
 
-const TileActionButton: React.FC<TileActionButtonProps> = ({ label, onClick, icon }) => {
+const TileActionButton: React.FC<TileActionButtonProps> = ({
+  label,
+  onClick,
+  icon,
+  isActive = false,
+  disabled = false,
+}) => {
   return (
     <button
       type="button"
@@ -171,11 +459,16 @@ const TileActionButton: React.FC<TileActionButtonProps> = ({ label, onClick, ico
         event.stopPropagation();
         onClick();
       }}
-      className="inline-flex h-8 items-center gap-1 border border-[var(--pc-border)] bg-[var(--pc-surface-strong)] px-2 font-mono text-[10px] uppercase tracking-[0.18em] text-[var(--pc-text)] transition-colors hover:bg-[var(--pc-action-inverse-bg)] hover:text-[var(--pc-action-inverse-text)]"
+      aria-label={label}
       title={label}
+      disabled={disabled}
+      className={`inline-flex h-8 w-8 items-center justify-center border border-[var(--pc-border)] backdrop-blur-sm transition-colors ${
+        isActive
+          ? "bg-[var(--pc-action-inverse-bg)] text-[var(--pc-action-inverse-text)]"
+          : "bg-[color-mix(in_srgb,var(--pc-surface)_82%,transparent)] text-[var(--pc-text)] hover:bg-[var(--pc-action-inverse-bg)] hover:text-[var(--pc-action-inverse-text)]"
+      } disabled:cursor-not-allowed disabled:opacity-40`}
     >
       {icon}
-      <span>{label}</span>
     </button>
   );
 };
@@ -205,8 +498,11 @@ const VoiceTile: React.FC<{
   isFocused?: boolean;
   canFocus?: boolean;
   canFullscreen?: boolean;
+  canPin?: boolean;
+  isPinned?: boolean;
   isSpeaking?: boolean;
   onFocusToggle?: () => void;
+  onPinToggle?: () => void;
   onFullscreenError?: (message: string) => void;
   onSelect?: () => void;
 }> = ({
@@ -219,8 +515,11 @@ const VoiceTile: React.FC<{
   isFocused = false,
   canFocus = false,
   canFullscreen = false,
+  canPin = false,
+  isPinned = false,
   isSpeaking = false,
   onFocusToggle,
+  onPinToggle,
   onFullscreenError,
   onSelect,
 }) => {
@@ -304,14 +603,22 @@ const VoiceTile: React.FC<{
     <div
       ref={containerRef}
       onClick={onSelect}
-      className={`relative flex flex-col overflow-hidden border-[3px] border-[var(--pc-border)] bg-[var(--pc-surface)] p-[3px] ${getSpeakingTileClasses(isSpeaking)} ${
+      className={`group relative flex flex-col overflow-hidden border-[3px] border-[var(--pc-border)] bg-[var(--pc-surface)] p-[3px] ${getSpeakingTileClasses(isSpeaking)} ${
         className ?? "min-h-[16rem]"
       } ${onSelect ? "cursor-pointer" : ""}`}
     >
       {!isCurrentUser && <audio ref={audioRef} autoPlay playsInline />}
 
-      {(canFocus || canFullscreen) && (
-        <div className="absolute right-5 top-5 z-10 flex items-center gap-2">
+      {(canFocus || canFullscreen || (canPin && onPinToggle)) && (
+        <div className="absolute right-3 top-3 z-10 flex items-center gap-1.5 border border-[var(--pc-border)] bg-[color-mix(in_srgb,var(--pc-bg)_74%,transparent)] p-1 opacity-0 shadow-[0_10px_24px_rgba(0,0,0,0.18)] backdrop-blur-sm transition-opacity group-hover:opacity-100 group-focus-within:opacity-100">
+          {canPin && onPinToggle && (
+            <TileActionButton
+              label={isPinned ? "Unpin" : "Pin"}
+              onClick={onPinToggle}
+              icon={<Pin className="h-3.5 w-3.5" />}
+              isActive={isPinned}
+            />
+          )}
           {canFocus && onFocusToggle && (
             <TileActionButton
               label={isFocused ? "Exit focus" : "Expand"}
@@ -365,6 +672,7 @@ const VoiceTile: React.FC<{
           <div className="font-mono text-[10px] text-[var(--pc-text)]">{stateLabel}</div>
         </div>
         <div className="flex items-center gap-2">
+          {isPinned && <StatusBadge label="P" enabled />}
           <StatusBadge label="M" enabled={participant.is_mic_enabled} />
           <StatusBadge label="C" enabled={showVideo} />
           <div className="font-mono text-[9px] uppercase tracking-[0.14em] text-[var(--pc-text)]">
@@ -385,8 +693,11 @@ const ScreenShareTile: React.FC<{
   isFocused?: boolean;
   canFocus?: boolean;
   canFullscreen?: boolean;
+  canPin?: boolean;
+  isPinned?: boolean;
   isSpeaking?: boolean;
   onFocusToggle?: () => void;
+  onPinToggle?: () => void;
   onFullscreenError?: (message: string) => void;
   onSelect?: () => void;
 }> = ({
@@ -398,8 +709,11 @@ const ScreenShareTile: React.FC<{
   isFocused = false,
   canFocus = true,
   canFullscreen = true,
+  canPin = false,
+  isPinned = false,
   isSpeaking = false,
   onFocusToggle,
+  onPinToggle,
   onFullscreenError,
   onSelect,
 }) => {
@@ -478,14 +792,22 @@ const ScreenShareTile: React.FC<{
     <div
       ref={containerRef}
       onClick={onSelect}
-      className={`relative flex flex-col overflow-hidden border-[3px] border-[var(--pc-border)] bg-[var(--pc-surface)] p-[3px] ${getSpeakingTileClasses(isSpeaking)} ${
+      className={`group relative flex flex-col overflow-hidden border-[3px] border-[var(--pc-border)] bg-[var(--pc-surface)] p-[3px] ${getSpeakingTileClasses(isSpeaking)} ${
         className ?? "min-h-[16rem]"
       } ${onSelect ? "cursor-pointer" : ""}`}
     >
       {!isCurrentUser && <audio ref={audioRef} autoPlay playsInline />}
 
-      {(canFocus || canFullscreen) && (
-        <div className="absolute right-5 top-5 z-10 flex items-center gap-2">
+      {(canFocus || canFullscreen || (canPin && onPinToggle)) && (
+        <div className="absolute right-3 top-3 z-10 flex items-center gap-1.5 border border-[var(--pc-border)] bg-[color-mix(in_srgb,var(--pc-bg)_74%,transparent)] p-1 opacity-0 shadow-[0_10px_24px_rgba(0,0,0,0.18)] backdrop-blur-sm transition-opacity group-hover:opacity-100 group-focus-within:opacity-100">
+          {canPin && onPinToggle && (
+            <TileActionButton
+              label={isPinned ? "Unpin" : "Pin"}
+              onClick={onPinToggle}
+              icon={<Pin className="h-3.5 w-3.5" />}
+              isActive={isPinned}
+            />
+          )}
           {canFocus && onFocusToggle && (
             <TileActionButton
               label={isFocused ? "Exit focus" : "Expand"}
@@ -533,12 +855,205 @@ const ScreenShareTile: React.FC<{
           <div className="font-mono text-[10px] text-[var(--pc-text)]">Screen share</div>
         </div>
         <div className="flex items-center gap-2">
+          {isPinned && <StatusBadge label="P" enabled />}
           <StatusBadge label="S" enabled />
           <div className="font-mono text-[9px] uppercase tracking-[0.14em] text-[var(--pc-text)]">
             {isSpeaking ? "Share audio" : "Share live"}
           </div>
         </div>
       </div>
+    </div>
+  );
+};
+
+const StageTileShell: React.FC<{
+  layout: StageTileLayout;
+  stageSize: { width: number; height: number };
+  aspectRatio: number;
+  minWidth: number;
+  zoom?: number;
+  snapToGridEnabled?: boolean;
+  editable?: boolean;
+  isPinned?: boolean;
+  isSelected?: boolean;
+  onSelect?: () => void;
+  onLayoutChange: (nextLayout: StageTileLayout) => void;
+  onBringToFront: () => void;
+  children: React.ReactNode;
+}> = ({
+  layout,
+  stageSize,
+  aspectRatio,
+  minWidth,
+  zoom = 1,
+  snapToGridEnabled = true,
+  editable = true,
+  isPinned = false,
+  isSelected = false,
+  onSelect,
+  onLayoutChange,
+  onBringToFront,
+  children,
+}) => {
+  const dragStateRef = useRef<{
+    mode: "move" | "resize";
+    pointerId: number;
+    offsetX: number;
+    offsetY: number;
+    startWidth: number;
+    startHeight: number;
+    startX: number;
+    startY: number;
+    stageLeft: number;
+    stageTop: number;
+  } | null>(null);
+
+  useEffect(() => {
+    const handlePointerMove = (event: PointerEvent) => {
+      const dragState = dragStateRef.current;
+      if (!dragState || dragState.pointerId !== event.pointerId) {
+        return;
+      }
+
+      const nextLayout =
+        dragState.mode === "move"
+          ? snapStageLayout(
+              {
+                ...layout,
+                x: (event.clientX - dragState.stageLeft - dragState.offsetX) / zoom,
+                y: (event.clientY - dragState.stageTop - dragState.offsetY) / zoom,
+              },
+              stageSize,
+              { enabled: snapToGridEnabled }
+            )
+          : (() => {
+              const deltaX = (event.clientX - dragState.startX) / zoom;
+              const nextWidth = clamp(
+                dragState.startWidth + deltaX,
+                minWidth,
+                stageSize.width - layout.x
+              );
+              const nextHeight = Math.round(nextWidth / aspectRatio);
+
+              return snapStageLayout(
+                {
+                  ...layout,
+                  w: nextWidth,
+                  h: clamp(nextHeight, 120, stageSize.height - layout.y),
+                },
+                stageSize,
+                { enabled: snapToGridEnabled, snapWidth: true, snapHeight: true }
+              );
+            })();
+
+      onLayoutChange(nextLayout);
+    };
+
+    const handlePointerUp = (event: PointerEvent) => {
+      if (dragStateRef.current?.pointerId !== event.pointerId) {
+        return;
+      }
+
+      dragStateRef.current = null;
+    };
+
+    window.addEventListener("pointermove", handlePointerMove);
+    window.addEventListener("pointerup", handlePointerUp);
+
+    return () => {
+      window.removeEventListener("pointermove", handlePointerMove);
+      window.removeEventListener("pointerup", handlePointerUp);
+    };
+  }, [aspectRatio, layout, minWidth, onLayoutChange, snapToGridEnabled, stageSize, zoom]);
+
+  return (
+    <div
+      data-stage-tile="true"
+      onPointerDown={(event) => {
+        if (!editable) {
+          onSelect?.();
+          return;
+        }
+
+        if (event.button !== 0) {
+          return;
+        }
+
+        const target = event.target as HTMLElement | null;
+        if (target?.closest("button")) {
+          return;
+        }
+
+        dragStateRef.current = {
+          mode: "move",
+          pointerId: event.pointerId,
+          offsetX:
+            event.clientX -
+            ((event.currentTarget.parentElement as HTMLElement | null)?.getBoundingClientRect().left ?? 0) -
+            layout.x * zoom,
+          offsetY:
+            event.clientY -
+            ((event.currentTarget.parentElement as HTMLElement | null)?.getBoundingClientRect().top ?? 0) -
+            layout.y * zoom,
+          startWidth: layout.w,
+          startHeight: layout.h,
+          startX: event.clientX,
+          startY: event.clientY,
+          stageLeft:
+            (event.currentTarget.parentElement as HTMLElement | null)?.getBoundingClientRect().left ?? 0,
+          stageTop:
+            (event.currentTarget.parentElement as HTMLElement | null)?.getBoundingClientRect().top ?? 0,
+        };
+        onBringToFront();
+        onSelect?.();
+      }}
+      onMouseDown={editable ? onBringToFront : undefined}
+      className={`group absolute touch-none select-none transition-shadow ${
+        isSelected
+          ? "shadow-[0_0_0_3px_var(--pc-action-inverse-bg),0_0_28px_rgba(0,0,0,0.32)]"
+          : editable
+            ? "hover:shadow-[0_0_0_2px_var(--pc-border)]"
+            : ""
+      }`}
+      style={{
+        left: layout.x,
+        top: layout.y,
+        width: layout.w,
+        height: layout.h,
+        zIndex: layout.z + (isPinned ? 10000 : 0),
+      }}
+    >
+      {children}
+      {editable && (
+        <button
+          type="button"
+          onPointerDown={(event) => {
+            event.stopPropagation();
+            dragStateRef.current = {
+              mode: "resize",
+              pointerId: event.pointerId,
+              offsetX: 0,
+              offsetY: 0,
+            startWidth: layout.w,
+            startHeight: layout.h,
+            startX: event.clientX,
+            startY: event.clientY,
+            stageLeft:
+              (event.currentTarget.parentElement as HTMLElement | null)?.getBoundingClientRect().left ?? 0,
+            stageTop:
+              (event.currentTarget.parentElement as HTMLElement | null)?.getBoundingClientRect().top ?? 0,
+          };
+          onBringToFront();
+          onSelect?.();
+          }}
+          className={`absolute bottom-2 right-2 z-20 flex h-5 w-5 items-center justify-center border border-[var(--pc-border)] bg-[var(--pc-action-inverse-bg)] text-[var(--pc-action-inverse-text)] transition-opacity ${
+            isSelected ? "opacity-100" : "opacity-0 group-hover:opacity-100"
+          }`}
+          title="Resize tile"
+        >
+          <span className="pointer-events-none font-mono text-[10px] leading-none">+</span>
+        </button>
+      )}
     </div>
   );
 };
@@ -570,7 +1085,35 @@ export default function RoomPage(): JSX.Element {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [focusedTileId, setFocusedTileId] = useState<string | null>(null);
+  const [selectedStageTileId, setSelectedStageTileId] = useState<string | null>(null);
+  const [layoutMode, setLayoutMode] = useState<RoomLayoutMode>("grid");
+  const [layoutPreference, setLayoutPreference] = useState<StageLayoutPreference>(() =>
+    getStageLayoutPreference()
+  );
+  const [personalStageLayouts, setPersonalStageLayouts] = useState<StageLayoutMap>({});
+  const [personalPinnedTileIds, setPersonalPinnedTileIds] = useState<string[]>([]);
+  const [sharedStageLayouts, setSharedStageLayouts] = useState<StageLayoutMap>({});
+  const [sharedPinnedTileIds, setSharedPinnedTileIds] = useState<string[]>([]);
+  const [showStageGrid, setShowStageGrid] = useState(true);
+  const [stageSize, setStageSize] = useState(defaultStageSize);
+  const [stageViewportSize, setStageViewportSize] = useState(defaultStageViewportSize);
+  const [stageViewOffset, setStageViewOffset] = useState<StageViewportOffset>({ x: 0, y: 0 });
+  const [stageZoom, setStageZoom] = useState(1);
+  const [sharedSyncNonce, setSharedSyncNonce] = useState(0);
   const autoRejoinAttemptRef = useRef<string | null>(null);
+  const stageCanvasRef = useRef<HTMLDivElement>(null);
+  const stagePanRef = useRef<{
+    pointerId: number;
+    startX: number;
+    startY: number;
+    originX: number;
+    originY: number;
+  } | null>(null);
+  const pendingSharedSyncRef = useRef(false);
+  const sharedSyncTimeoutRef = useRef<number | null>(null);
+  const sharedStageLayoutsRef = useRef<StageLayoutMap>({});
+  const sharedPinnedTileIdsRef = useRef<string[]>([]);
+  const lastSharedEditAtRef = useRef(0);
 
   const getRoomDisplayName = useCallback(
     (rawName: string, membersList: RoomStateResponse["members"]) => {
@@ -631,6 +1174,115 @@ export default function RoomPage(): JSX.Element {
   }, [loadRoomState, roomIdentifier, token]);
 
   useEffect(() => {
+    if (!roomIdentifier) {
+      return;
+    }
+
+    try {
+      const rawValue = window.localStorage.getItem(getStageStorageKey(roomIdentifier));
+      if (!rawValue) {
+        setLayoutMode("grid");
+        setPersonalStageLayouts({});
+        setPersonalPinnedTileIds([]);
+        return;
+      }
+
+      const parsed = JSON.parse(rawValue) as StageStorageState;
+
+      setLayoutMode(parsed.layoutMode === "stage" ? "stage" : "grid");
+      setPersonalStageLayouts(parsed.personalStageLayouts ?? parsed.stageLayouts ?? {});
+      setPersonalPinnedTileIds(parsed.personalPinnedTileIds ?? parsed.pinnedTileIds ?? []);
+      setShowStageGrid(parsed.showStageGrid ?? true);
+      const nextZoom = clamp(parsed.stageZoom ?? 1, minStageZoom, maxStageZoom);
+      setStageZoom(nextZoom);
+      setStageViewOffset(
+        parsed.stageViewOffset ?? getCenteredStageViewOffset(stageSize, stageViewportSize, nextZoom)
+      );
+    } catch {
+      setLayoutMode("grid");
+      setPersonalStageLayouts({});
+      setPersonalPinnedTileIds([]);
+      setShowStageGrid(true);
+      setStageZoom(1);
+      setStageViewOffset(getCenteredStageViewOffset(stageSize, stageViewportSize, 1));
+    }
+  }, [roomIdentifier, stageSize, stageViewportSize]);
+
+  useEffect(() => {
+    if (!roomIdentifier) {
+      return;
+    }
+
+    window.localStorage.setItem(
+      getStageStorageKey(roomIdentifier),
+      JSON.stringify({
+        layoutMode,
+        personalStageLayouts,
+        personalPinnedTileIds,
+        showStageGrid,
+        stageViewOffset,
+        stageZoom,
+      })
+    );
+  }, [layoutMode, personalPinnedTileIds, personalStageLayouts, roomIdentifier, showStageGrid, stageViewOffset, stageZoom]);
+
+  useEffect(() => {
+    setLayoutPreference(getStageLayoutPreference());
+  }, [roomIdentifier]);
+
+  useEffect(() => {
+    sharedStageLayoutsRef.current = sharedStageLayouts;
+  }, [sharedStageLayouts]);
+
+  useEffect(() => {
+    sharedPinnedTileIdsRef.current = sharedPinnedTileIds;
+  }, [sharedPinnedTileIds]);
+
+  useEffect(() => {
+    if (!roomState?.stage_layout || pendingSharedSyncRef.current) {
+      return;
+    }
+
+    if (Date.now() - lastSharedEditAtRef.current < 1500) {
+      return;
+    }
+
+    setSharedStageLayouts(roomState.stage_layout.stage_layouts ?? {});
+    setSharedPinnedTileIds(roomState.stage_layout.pinned_tile_ids ?? []);
+  }, [roomState?.stage_layout]);
+
+  useEffect(() => {
+    const updateStageSize = () => {
+      const nextWidth = stageCanvasRef.current?.clientWidth ?? defaultStageViewportSize.width;
+      const nextHeight = stageCanvasRef.current?.clientHeight ?? defaultStageViewportSize.height;
+      setStageViewportSize({
+        width: Math.max(nextWidth, 640),
+        height: Math.max(nextHeight, 420),
+      });
+    };
+
+    updateStageSize();
+    window.addEventListener("resize", updateStageSize);
+
+    return () => window.removeEventListener("resize", updateStageSize);
+  }, []);
+
+  useEffect(() => {
+    setStageSize(defaultStageSize);
+  }, []);
+
+  useEffect(() => {
+    setStageViewOffset((current) => {
+      const currentIsZero = current.x === 0 && current.y === 0;
+      const nextOffset = currentIsZero
+        ? getCenteredStageViewOffset(stageSize, stageViewportSize, stageZoom)
+        : clampStageViewOffset(current, stageSize, stageViewportSize, stageZoom);
+
+      return nextOffset.x === current.x && nextOffset.y === current.y ? current : nextOffset;
+    });
+  }, [stageSize, stageViewportSize, stageZoom]);
+
+  useEffect(() => {
     if (!token || !roomIdentifier) return;
 
     const interval = setInterval(() => {
@@ -643,6 +1295,14 @@ export default function RoomPage(): JSX.Element {
   const roomName = getRoomDisplayName(roomState?.room.name || routeRoomName, roomState?.members ?? []);
   const voiceParticipants = roomState?.voice_participants ?? [];
   const members = roomState?.members ?? [];
+  const canEditSharedStageLayout = roomState?.stage_layout.can_edit_shared ?? false;
+  const isSharedStageLocked = roomState?.stage_layout.shared_locked ?? false;
+  const activeStageLayouts =
+    layoutPreference === "shared" ? sharedStageLayouts : personalStageLayouts;
+  const activePinnedTileIds =
+    layoutPreference === "shared" ? sharedPinnedTileIds : personalPinnedTileIds;
+  const canEditStageLayout =
+    layoutPreference === "personal" || canEditSharedStageLayout;
   const isCurrentRoomSession =
     roomVoiceState.roomId === roomIdentifier && roomVoiceState.status !== "idle";
   const inVoice = Boolean(roomState?.in_voice) || isCurrentRoomSession;
@@ -753,6 +1413,96 @@ export default function RoomPage(): JSX.Element {
     [displayedVoiceParticipants, liveParticipantsByUserId, localVideoTrack, screenShareTiles, user?.user_id]
   );
 
+  const stageTiles = useMemo(
+    () => [
+      ...displayedVoiceParticipants.map((participant) => {
+        const liveParticipant = liveParticipantsByUserId.get(participant.user_id);
+        const cameraTrack =
+          participant.user_id === user?.user_id
+            ? localVideoTrack ?? liveParticipant?.cameraTrack
+            : liveParticipant?.cameraTrack;
+
+        return {
+          id: `camera:${participant.user_id}`,
+          kind: "camera" as const,
+          participant,
+          track: cameraTrack,
+          audioTrack: liveParticipant?.audioTrack,
+          isCameraOff: liveParticipant?.isCameraOff,
+          hasVisual: Boolean(cameraTrack) && !liveParticipant?.isCameraOff,
+        };
+      }),
+      ...screenShareTiles.map(({ participant, screenShareTrack, screenShareAudioTrack }) => ({
+        id: `screen-share:${participant.user_id}`,
+        kind: "screen-share" as const,
+        participant,
+        track: screenShareTrack,
+        audioTrack: screenShareAudioTrack,
+        isCameraOff: false,
+        hasVisual: true,
+      })),
+    ],
+    [displayedVoiceParticipants, liveParticipantsByUserId, localVideoTrack, screenShareTiles, user?.user_id]
+  );
+  const setActiveStageLayouts = useCallback(
+    (
+      next:
+        | StageLayoutMap
+        | ((current: StageLayoutMap) => StageLayoutMap)
+    ) => {
+      if (layoutPreference === "shared") {
+        setSharedStageLayouts((current) => {
+          const resolved = typeof next === "function" ? next(current) : next;
+          if (areStageLayoutsEqual(current, resolved)) {
+            return current;
+          }
+
+          lastSharedEditAtRef.current = Date.now();
+          setSharedSyncNonce((value) => value + 1);
+          return resolved;
+        });
+        return;
+      }
+
+      setPersonalStageLayouts((current) => {
+        const resolved = typeof next === "function" ? next(current) : next;
+        return areStageLayoutsEqual(current, resolved) ? current : resolved;
+      });
+    },
+    [layoutPreference]
+  );
+  const setActivePinnedTileIds = useCallback(
+    (
+      next:
+        | string[]
+        | ((current: string[]) => string[])
+    ) => {
+      if (layoutPreference === "shared") {
+        setSharedPinnedTileIds((current) => {
+          const resolved = typeof next === "function" ? next(current) : next;
+          if (areStringArraysEqual(current, resolved)) {
+            return current;
+          }
+
+          lastSharedEditAtRef.current = Date.now();
+          setSharedSyncNonce((value) => value + 1);
+          return resolved;
+        });
+        return;
+      }
+
+      setPersonalPinnedTileIds((current) => {
+        const resolved = typeof next === "function" ? next(current) : next;
+        return areStringArraysEqual(current, resolved) ? current : resolved;
+      });
+    },
+    [layoutPreference]
+  );
+  const orderedStageTiles = useMemo(
+    () => orderStageTiles(stageTiles, activePinnedTileIds),
+    [activePinnedTileIds, stageTiles]
+  );
+
   const focusedTile = focusedTileId
     ? visualTiles.find((tile) => tile.id === focusedTileId) ?? null
     : null;
@@ -775,6 +1525,166 @@ export default function RoomPage(): JSX.Element {
     : [];
 
   const canToggleMedia = isCurrentRoomSession && roomVoiceState.status === "active" && !isSubmitting;
+  const isStageMode = layoutMode === "stage";
+  const isCreator = members.some(
+    (member) => member.user_id === user?.user_id && member.role === "creator"
+  );
+
+  const handleResetStageLayout = () => {
+    setSelectedStageTileId(null);
+    setActiveStageLayouts(
+      Object.fromEntries(
+        orderedStageTiles.map((tile) => [
+          tile.id,
+          getDefaultStageTileLayout(tile, orderedStageTiles, stageSize),
+        ])
+      )
+    );
+  };
+
+  const handleCenterStageView = () => {
+    setStageViewOffset(getCenteredStageViewOffset(stageSize, stageViewportSize, stageZoom));
+  };
+
+  const handleAdjustStageZoom = (direction: "in" | "out") => {
+    setStageZoom((current) => {
+      const nextZoom = clamp(
+        Number((current + (direction === "in" ? 0.1 : -0.1)).toFixed(2)),
+        minStageZoom,
+        maxStageZoom
+      );
+
+      setStageViewOffset((offset) =>
+        clampStageViewOffset(offset, stageSize, stageViewportSize, nextZoom)
+      );
+
+      return nextZoom;
+    });
+  };
+
+  const handleTogglePinnedTile = (tileId: string) => {
+    const nextZ = Math.max(1, ...Object.values(activeStageLayouts).map((layout) => layout.z + 1));
+
+    setActivePinnedTileIds((current) =>
+      current.includes(tileId) ? current.filter((id) => id !== tileId) : [...current, tileId]
+    );
+    setActiveStageLayouts((current) => ({
+      ...current,
+      [tileId]: current[tileId]
+        ? {
+            ...current[tileId],
+            z: nextZ,
+          }
+        : current[tileId],
+    }));
+  };
+
+  const handleToggleSharedStageLock = async () => {
+    if (!token || !roomIdentifier || !isCreator) {
+      return;
+    }
+
+    setIsSubmitting(true);
+    try {
+      await updateRoomSharedStageLayoutLock(roomIdentifier, !isSharedStageLocked, token);
+      await loadRoomState();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to update shared stage lock");
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  useEffect(() => {
+    if (layoutMode !== "stage") {
+      setSelectedStageTileId(null);
+      return;
+    }
+
+    setFocusedTileId(null);
+  }, [layoutMode]);
+
+  useEffect(() => {
+    if (!selectedStageTileId) {
+      return;
+    }
+
+    if (orderedStageTiles.some((tile) => tile.id === selectedStageTileId)) {
+      return;
+    }
+
+    setSelectedStageTileId(null);
+  }, [orderedStageTiles, selectedStageTileId]);
+
+  useEffect(() => {
+    if (orderedStageTiles.length === 0) {
+      setActiveStageLayouts({});
+      return;
+    }
+
+    setActiveStageLayouts((current) => {
+      const nextLayouts: StageLayoutMap = {};
+
+      orderedStageTiles.forEach((tile) => {
+        const existing = current[tile.id];
+        nextLayouts[tile.id] = existing
+          ? clampStageLayout(existing, stageSize)
+          : getDefaultStageTileLayout(tile, orderedStageTiles, stageSize);
+      });
+
+      return nextLayouts;
+    });
+  }, [orderedStageTiles, setActiveStageLayouts, stageSize]);
+
+  useEffect(() => {
+    if (sharedSyncTimeoutRef.current !== null) {
+      window.clearTimeout(sharedSyncTimeoutRef.current);
+      sharedSyncTimeoutRef.current = null;
+    }
+
+    if (
+      sharedSyncNonce === 0 ||
+      layoutPreference !== "shared" ||
+      !token ||
+      !roomIdentifier ||
+      !canEditSharedStageLayout
+    ) {
+      pendingSharedSyncRef.current = false;
+      return;
+    }
+
+    pendingSharedSyncRef.current = true;
+    sharedSyncTimeoutRef.current = window.setTimeout(() => {
+      void updateRoomSharedStageLayout(
+        roomIdentifier,
+        {
+          stage_layouts: sharedStageLayoutsRef.current,
+          pinned_tile_ids: sharedPinnedTileIdsRef.current,
+        },
+        token
+      )
+        .catch((err) => {
+          setError(err instanceof Error ? err.message : "Failed to sync shared stage layout");
+        })
+        .finally(() => {
+          pendingSharedSyncRef.current = false;
+          sharedSyncTimeoutRef.current = null;
+        });
+    }, 300);
+
+    return () => {
+      if (sharedSyncTimeoutRef.current !== null) {
+        window.clearTimeout(sharedSyncTimeoutRef.current);
+        sharedSyncTimeoutRef.current = null;
+      }
+    };
+  }, [
+    canEditSharedStageLayout,
+    layoutPreference,
+    roomIdentifier,
+    sharedSyncNonce,
+    token,
+  ]);
 
   useEffect(() => {
     if (
@@ -970,6 +1880,88 @@ export default function RoomPage(): JSX.Element {
           </div>
 
           <div className="flex items-center gap-2 sm:gap-[10px]">
+            <div className="flex h-10 items-center border-2 border-[var(--pc-border)]">
+              <button
+                type="button"
+                onClick={() => setLayoutMode("grid")}
+                className={`flex h-full items-center px-3 font-mono text-[11px] font-bold uppercase tracking-[0.14em] transition-colors ${
+                  layoutMode === "grid"
+                    ? "bg-[var(--pc-action-inverse-bg)] text-[var(--pc-action-inverse-text)]"
+                    : "bg-[var(--pc-bg)] text-[var(--pc-text)] hover:bg-[var(--pc-surface-strong)]"
+                }`}
+              >
+                Grid
+              </button>
+              <button
+                type="button"
+                onClick={() => setLayoutMode("stage")}
+                className={`flex h-full items-center px-3 font-mono text-[11px] font-bold uppercase tracking-[0.14em] transition-colors ${
+                  layoutMode === "stage"
+                    ? "bg-[var(--pc-action-inverse-bg)] text-[var(--pc-action-inverse-text)]"
+                    : "bg-[var(--pc-bg)] text-[var(--pc-text)] hover:bg-[var(--pc-surface-strong)]"
+                }`}
+              >
+                Stage
+              </button>
+            </div>
+            {isStageMode && (
+              <>
+                <div className="hidden h-10 items-center justify-center border-2 border-[var(--pc-border)] bg-[var(--pc-bg)] px-[14px] font-mono text-[11px] font-bold uppercase tracking-[0.14em] text-[var(--pc-text)] lg:flex">
+                  {layoutPreference === "shared" ? "Shared Layout" : "Personal Layout"}
+                </div>
+                {layoutPreference === "shared" && isCreator && (
+                  <button
+                    type="button"
+                    onClick={() => void handleToggleSharedStageLock()}
+                    disabled={isSubmitting}
+                    className="flex h-10 items-center justify-center border-2 border-[var(--pc-border)] bg-[var(--pc-bg)] px-[14px] font-mono text-[11px] font-bold uppercase tracking-[0.14em] text-[var(--pc-text)] transition-colors hover:bg-[var(--pc-surface-strong)] disabled:opacity-40"
+                  >
+                    {isSharedStageLocked ? "Unlock Shared" : "Lock Shared"}
+                  </button>
+                )}
+                <button
+                  type="button"
+                  onClick={() => setShowStageGrid((current) => !current)}
+                  className="flex h-10 items-center justify-center border-2 border-[var(--pc-border)] bg-[var(--pc-bg)] px-[14px] font-mono text-[11px] font-bold uppercase tracking-[0.14em] text-[var(--pc-text)] transition-colors hover:bg-[var(--pc-surface-strong)]"
+                >
+                  Grid {showStageGrid ? "On" : "Off"}
+                </button>
+                <button
+                  type="button"
+                  onClick={handleCenterStageView}
+                  className="flex h-10 items-center justify-center border-2 border-[var(--pc-border)] bg-[var(--pc-bg)] px-[14px] font-mono text-[11px] font-bold uppercase tracking-[0.14em] text-[var(--pc-text)] transition-colors hover:bg-[var(--pc-surface-strong)]"
+                >
+                  Center View
+                </button>
+                <div className="flex h-10 items-center border-2 border-[var(--pc-border)]">
+                  <button
+                    type="button"
+                    onClick={() => handleAdjustStageZoom("out")}
+                    className="flex h-full items-center px-3 font-mono text-[11px] font-bold uppercase tracking-[0.14em] transition-colors hover:bg-[var(--pc-surface-strong)]"
+                  >
+                    -
+                  </button>
+                  <div className="flex h-full min-w-[72px] items-center justify-center border-l-2 border-r-2 border-[var(--pc-border)] px-2 font-mono text-[11px] font-bold uppercase tracking-[0.14em]">
+                    {Math.round(stageZoom * 100)}%
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => handleAdjustStageZoom("in")}
+                    className="flex h-full items-center px-3 font-mono text-[11px] font-bold uppercase tracking-[0.14em] transition-colors hover:bg-[var(--pc-surface-strong)]"
+                  >
+                    +
+                  </button>
+                </div>
+                <button
+                  type="button"
+                  onClick={handleResetStageLayout}
+                  disabled={!canEditStageLayout}
+                  className="flex h-10 items-center justify-center border-2 border-[var(--pc-border)] bg-[var(--pc-bg)] px-[14px] font-mono text-[11px] font-bold uppercase tracking-[0.14em] text-[var(--pc-text)] transition-colors hover:bg-[var(--pc-surface-strong)] disabled:cursor-not-allowed disabled:opacity-40"
+                >
+                  Reset
+                </button>
+              </>
+            )}
             <div className="flex h-9 items-center justify-center border-2 border-[var(--pc-border)] bg-[var(--pc-action-bg)] px-[10px] font-mono text-xs font-bold uppercase tracking-[0.14em]">
               {formatOnlineCount(members.length)}
             </div>
@@ -996,7 +1988,7 @@ export default function RoomPage(): JSX.Element {
         </header>
 
         <div className="flex min-h-0 flex-1 flex-col gap-3 p-[10px]">
-          {focusedTile ? (
+          {layoutMode === "grid" && focusedTile ? (
             <div className="flex min-h-0 flex-1 flex-col gap-3">
               <div className="min-h-0 flex-1">
                 {focusedTile.kind === "camera" ? (
@@ -1100,6 +2092,188 @@ export default function RoomPage(): JSX.Element {
                           onFullscreenError={setError}
                         />
                       </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          ) : layoutMode === "stage" ? (
+            <div
+              ref={stageCanvasRef}
+              onPointerDown={(event) => {
+                if (event.button !== 0) {
+                  return;
+                }
+
+                const target = event.target as HTMLElement | null;
+                if (target?.closest("[data-stage-tile='true']") || target?.closest("button")) {
+                  return;
+                }
+
+                stagePanRef.current = {
+                  pointerId: event.pointerId,
+                  startX: event.clientX,
+                  startY: event.clientY,
+                  originX: stageViewOffset.x,
+                  originY: stageViewOffset.y,
+                };
+              }}
+              onPointerMove={(event) => {
+                const panState = stagePanRef.current;
+                if (!panState || panState.pointerId !== event.pointerId) {
+                  return;
+                }
+
+                setStageViewOffset(
+                  clampStageViewOffset(
+                    {
+                      x: panState.originX + (event.clientX - panState.startX),
+                      y: panState.originY + (event.clientY - panState.startY),
+                    },
+                    stageSize,
+                    stageViewportSize,
+                    stageZoom
+                  )
+                );
+              }}
+              onPointerUp={(event) => {
+                if (stagePanRef.current?.pointerId === event.pointerId) {
+                  stagePanRef.current = null;
+                }
+              }}
+              onPointerLeave={(event) => {
+                if (stagePanRef.current?.pointerId === event.pointerId) {
+                  stagePanRef.current = null;
+                }
+              }}
+              className={`relative min-h-[42rem] flex-1 overflow-hidden ${shellClass} bg-[var(--pc-bg)] p-[10px] ${
+                stagePanRef.current ? "cursor-grabbing" : "cursor-grab"
+              }`}
+            >
+              <div className="pointer-events-none absolute inset-0 bg-[var(--pc-bg)] opacity-85" />
+              {layoutPreference === "shared" && !canEditStageLayout && (
+                <div className="absolute left-3 top-3 z-20 border border-[var(--pc-border)] bg-[var(--pc-panel)] px-3 py-2 font-mono text-[10px] font-bold uppercase tracking-[0.16em] text-[var(--pc-text-muted)]">
+                  Shared layout locked by owner
+                </div>
+              )}
+              {displayedVoiceParticipants.length === 0 ? (
+                <div className="relative z-10 flex h-full min-h-[20rem] items-center justify-center p-8">
+                  <div className="text-center">
+                    <div className="mx-auto mb-4 flex h-16 w-16 items-center justify-center border-2 border-[var(--pc-border)]">
+                      <Radio className="h-7 w-7" />
+                    </div>
+                    <div className="mb-2 font-mono text-sm font-bold uppercase tracking-[0.18em]">
+                      Voice channel is empty
+                    </div>
+                    <p className="mb-5 text-sm text-[var(--pc-text-muted)]">
+                      Join the room to start talking, turn on your camera, or share your screen.
+                    </p>
+                    {!inVoice && (
+                      <button
+                        type="button"
+                        onClick={() => void handleJoinVoice()}
+                        disabled={isSubmitting}
+                        className="border-2 border-[var(--pc-border)] bg-[var(--pc-action-inverse-bg)] px-5 py-3 font-mono text-xs font-bold uppercase tracking-[0.18em] text-[var(--pc-action-inverse-text)] disabled:opacity-40"
+                      >
+                        Join Voice
+                      </button>
+                    )}
+                  </div>
+                </div>
+              ) : (
+                <div
+                  className="absolute left-0 top-0"
+                  style={{
+                    width: stageSize.width,
+                    height: stageSize.height,
+                    transform: `translate(${stageViewOffset.x}px, ${stageViewOffset.y}px) scale(${stageZoom})`,
+                    transformOrigin: "top left",
+                    border: "2px solid var(--pc-border)",
+                    boxShadow: "0 0 0 1px color-mix(in_srgb,var(--pc-border)_40%,transparent) inset",
+                  }}
+                >
+                  {showStageGrid && (
+                    <div className="pointer-events-none absolute inset-0 bg-[linear-gradient(to_right,transparent_0,transparent_39px,var(--pc-border)_40px),linear-gradient(to_bottom,transparent_0,transparent_39px,var(--pc-border)_40px)] bg-[size:40px_40px]" />
+                  )}
+                  {orderedStageTiles.map((tile) => {
+                    const tileLayout = activeStageLayouts[tile.id];
+                    if (!tileLayout) {
+                      return null;
+                    }
+
+                    return (
+                      <StageTileShell
+                        key={tile.id}
+                        layout={tileLayout}
+                        stageSize={stageSize}
+                        aspectRatio={getStageTileAspectRatio(tile.kind, tile.hasVisual)}
+                        minWidth={tile.kind === "screen-share" ? 420 : tile.hasVisual ? 220 : 180}
+                        zoom={stageZoom}
+                        snapToGridEnabled={showStageGrid}
+                        editable={canEditStageLayout}
+                        isPinned={activePinnedTileIds.includes(tile.id)}
+                        isSelected={selectedStageTileId === tile.id}
+                        onSelect={() => setSelectedStageTileId(tile.id)}
+                        onBringToFront={() => {
+                          const nextZ = Math.max(
+                            1,
+                            ...Object.values(activeStageLayouts).map((layout) => layout.z + 1)
+                          );
+                          setActiveStageLayouts((current) => ({
+                            ...current,
+                            [tile.id]: {
+                              ...current[tile.id],
+                              z: nextZ,
+                            },
+                          }));
+                        }}
+                        onLayoutChange={(nextLayout) => {
+                          setActiveStageLayouts((current) => ({
+                            ...current,
+                            [tile.id]: nextLayout,
+                          }));
+                        }}
+                      >
+                        {tile.kind === "camera" ? (
+                          <VoiceTile
+                            participant={tile.participant}
+                            isCurrentUser={tile.participant.user_id === user?.user_id}
+                            isCameraOff={tile.isCameraOff}
+                            cameraTrack={tile.track}
+                            audioTrack={tile.audioTrack}
+                            className="h-full"
+                            canPin={canEditStageLayout}
+                            isPinned={activePinnedTileIds.includes(tile.id)}
+                            isSpeaking={isParticipantHighlighted(
+                              tile.participant,
+                              liveParticipantsByUserId.get(tile.participant.user_id)?.identity,
+                              activeSpeakerIds
+                            )}
+                            onPinToggle={() => handleTogglePinnedTile(tile.id)}
+                            canFullscreen={tile.hasVisual}
+                            onFullscreenError={setError}
+                          />
+                        ) : (
+                          <ScreenShareTile
+                            participant={tile.participant}
+                            screenShareTrack={tile.track}
+                            screenShareAudioTrack={tile.audioTrack}
+                            isCurrentUser={tile.participant.user_id === user?.user_id}
+                            className="h-full"
+                            canFocus={false}
+                            canPin={canEditStageLayout}
+                            isPinned={activePinnedTileIds.includes(tile.id)}
+                            canFullscreen
+                            isSpeaking={isParticipantHighlighted(
+                              tile.participant,
+                              liveParticipantsByUserId.get(tile.participant.user_id)?.identity,
+                              activeScreenShareSpeakerIds
+                            )}
+                            onPinToggle={() => handleTogglePinnedTile(tile.id)}
+                            onFullscreenError={setError}
+                          />
+                        )}
+                      </StageTileShell>
                     );
                   })}
                 </div>

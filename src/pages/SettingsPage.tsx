@@ -1,5 +1,10 @@
 import React from "react";
 
+import {
+  getStageLayoutPreference,
+  setStageLayoutPreference,
+  type StageLayoutPreference,
+} from "../app-preferences";
 import { useAuth } from "../context/AuthContext";
 import { useTheme } from "../context/ThemeContext";
 
@@ -10,6 +15,8 @@ const actionButtonClass =
 const SettingsPage: React.FC = () => {
   const { user, logout } = useAuth();
   const { theme, setTheme } = useTheme();
+  const [stageLayoutPreference, setStageLayoutPreferenceState] =
+    React.useState<StageLayoutPreference>(() => getStageLayoutPreference());
 
   return (
     <div className="space-y-6 text-[var(--pc-text)]">
@@ -94,6 +101,49 @@ const SettingsPage: React.FC = () => {
             }`}
           >
             Light
+          </button>
+        </div>
+      </section>
+
+      <section className={`${panelClass} p-5`}>
+        <div className="mb-4">
+          <div className="font-mono text-[11px] font-bold uppercase tracking-[0.16em] text-[var(--pc-text-muted)]">
+            Stage
+          </div>
+          <h2 className="mt-2 text-xl font-semibold">Layout Preference</h2>
+          <p className="mt-1 text-sm text-[var(--pc-text-muted)]">
+            Shared uses the room scene for everyone. Personal keeps your own stage arrangement locally.
+          </p>
+        </div>
+
+        <div className="flex flex-wrap gap-3">
+          <button
+            type="button"
+            onClick={() => {
+              setStageLayoutPreference("shared");
+              setStageLayoutPreferenceState("shared");
+            }}
+            className={`${actionButtonClass} ${
+              stageLayoutPreference === "shared"
+                ? "bg-[var(--pc-action-inverse-bg)] text-[var(--pc-action-inverse-text)] hover:bg-[var(--pc-action-inverse-hover)]"
+                : "bg-[var(--pc-action-bg)] text-[var(--pc-action-text)] hover:bg-[var(--pc-action-hover)]"
+            }`}
+          >
+            Shared Layout
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              setStageLayoutPreference("personal");
+              setStageLayoutPreferenceState("personal");
+            }}
+            className={`${actionButtonClass} ${
+              stageLayoutPreference === "personal"
+                ? "bg-[var(--pc-action-inverse-bg)] text-[var(--pc-action-inverse-text)] hover:bg-[var(--pc-action-inverse-hover)]"
+                : "bg-[var(--pc-action-bg)] text-[var(--pc-action-text)] hover:bg-[var(--pc-action-hover)]"
+            }`}
+          >
+            Personal Layout
           </button>
         </div>
       </section>
