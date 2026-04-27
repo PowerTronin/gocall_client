@@ -8,13 +8,11 @@ import {
   Minimize2,
   Monitor,
   MonitorOff,
-  Users,
-  Video,
-  VideoOff,
   PhoneOff,
   Radio,
+  Video,
+  VideoOff,
 } from "lucide-react";
-import { motion } from "framer-motion";
 import { AudioTrack, Track, VideoTrack } from "livekit-client";
 
 import { useAuth } from "../context/AuthContext";
@@ -25,7 +23,6 @@ import {
   RoomStateResponse,
   RoomVoiceParticipantState,
 } from "../services/rooms-api";
-
 interface ControlButtonProps {
   icon: React.ReactNode;
   activeIcon?: React.ReactNode;
@@ -50,13 +47,16 @@ interface VisualTile {
   audioTrack?: Track;
 }
 
+const shellClass = "border-2 border-[var(--pc-border)] bg-[var(--pc-bg)]";
+const monoMetaClass = "font-mono text-[10px] uppercase tracking-[0.24em] text-[var(--pc-text-muted)]";
+
 const getFullscreenToggleError = (error: unknown): string => {
   return error instanceof Error ? error.message : "Failed to toggle fullscreen";
 };
 
 const getSpeakingTileClasses = (isSpeaking: boolean): string => {
   return isSpeaking
-    ? "ring-4 ring-emerald-400 border-2 border-emerald-300 shadow-[0_0_0_2px_rgba(52,211,153,0.75),0_0_28px_rgba(52,211,153,0.45)]"
+    ? "shadow-[0_0_0_2px_rgba(74,222,128,0.95),0_0_24px_rgba(74,222,128,0.28)]"
     : "";
 };
 
@@ -65,7 +65,76 @@ const isParticipantHighlighted = (
   liveIdentity: string | undefined,
   activeIds: Set<string>
 ): boolean => {
-  return activeIds.has(participant.user_id) || activeIds.has(participant.username) || Boolean(liveIdentity && activeIds.has(liveIdentity));
+  return (
+    activeIds.has(participant.user_id) ||
+    activeIds.has(participant.username) ||
+    Boolean(liveIdentity && activeIds.has(liveIdentity))
+  );
+};
+
+const formatOnlineCount = (count: number): string => {
+  return `${String(Math.max(count, 0)).padStart(2, "0")} ONLINE`;
+};
+
+const getParticipantTileStateLabel = (
+  participant: RoomVoiceParticipantState,
+  options: {
+    isCurrentUser: boolean;
+    showVideo: boolean;
+    isSpeaking: boolean;
+  }
+): string => {
+  if (participant.is_screen_sharing) {
+    return "Sharing screen";
+  }
+
+  if (options.isSpeaking) {
+    return "Speaking";
+  }
+
+  if (!participant.is_mic_enabled && !options.showVideo) {
+    return "Voice only";
+  }
+
+  if (!participant.is_mic_enabled) {
+    return "Muted";
+  }
+
+  if (!options.showVideo) {
+    return "Listening";
+  }
+
+  return options.isCurrentUser ? "Camera live" : "Connected";
+};
+
+const getParticipantStripLabel = (
+  participant: RoomVoiceParticipantState,
+  options: {
+    showVideo: boolean;
+    isSpeaking: boolean;
+  }
+): string => {
+  if (participant.is_screen_sharing) {
+    return "Share live";
+  }
+
+  if (options.isSpeaking) {
+    return "Speaking";
+  }
+
+  if (!participant.is_mic_enabled && !options.showVideo) {
+    return "Voice only";
+  }
+
+  if (!participant.is_mic_enabled && options.showVideo) {
+    return "Muted / Cam On";
+  }
+
+  if (participant.is_mic_enabled && !options.showVideo) {
+    return "Listening";
+  }
+
+  return "Live";
 };
 
 const ControlButton: React.FC<ControlButtonProps> = ({
@@ -77,20 +146,17 @@ const ControlButton: React.FC<ControlButtonProps> = ({
   onClick,
   label,
 }) => {
-  const baseClasses =
-    "w-12 h-12 rounded-full flex items-center justify-center transition-all disabled:opacity-50 disabled:cursor-not-allowed";
   const colorClasses = isDanger
-    ? "bg-red-500 hover:bg-red-600"
-    : isActive
-      ? "bg-gray-600 hover:bg-gray-500"
-      : "bg-gray-700 hover:bg-gray-600";
+    ? "bg-[var(--pc-action-inverse-bg)] text-[var(--pc-action-inverse-text)] hover:bg-[var(--pc-action-inverse-hover)]"
+    : "bg-[var(--pc-bg)] text-[var(--pc-text)] hover:bg-[var(--pc-action-bg)]";
 
   return (
     <button
+      type="button"
       onClick={onClick}
       disabled={disabled}
-      className={`${baseClasses} ${colorClasses}`}
       title={label}
+      className={`flex h-11 w-11 items-center justify-center border-2 border-[var(--pc-border)] transition-colors disabled:cursor-not-allowed disabled:opacity-40 ${colorClasses}`}
     >
       {isActive && activeIcon ? activeIcon : icon}
     </button>
@@ -105,12 +171,27 @@ const TileActionButton: React.FC<TileActionButtonProps> = ({ label, onClick, ico
         event.stopPropagation();
         onClick();
       }}
-      className="inline-flex items-center gap-1 rounded-md bg-black/55 px-2 py-1 text-xs font-medium text-white transition-colors hover:bg-black/75"
+      className="inline-flex h-8 items-center gap-1 border border-[var(--pc-border)] bg-[var(--pc-surface-strong)] px-2 font-mono text-[10px] uppercase tracking-[0.18em] text-[var(--pc-text)] transition-colors hover:bg-[var(--pc-action-inverse-bg)] hover:text-[var(--pc-action-inverse-text)]"
       title={label}
     >
       {icon}
       <span>{label}</span>
     </button>
+  );
+};
+
+const StatusBadge: React.FC<{
+  label: string;
+  enabled: boolean;
+}> = ({ label, enabled }) => {
+  return (
+    <div
+      className={`flex min-w-[30px] items-center justify-center border-2 px-2 py-1 font-mono text-[10px] font-bold uppercase ${
+        enabled ? "border-[var(--pc-border)] bg-[var(--pc-action-inverse-bg)] text-[var(--pc-action-inverse-text)]" : "border-[var(--pc-border)] text-[var(--pc-text)]"
+      }`}
+    >
+      {label}
+    </div>
   );
 };
 
@@ -150,11 +231,12 @@ const VoiceTile: React.FC<{
   const [isFullscreen, setIsFullscreen] = useState(false);
   const hasVideoTrack = Boolean(cameraTrack);
   const showVideo = hasVideoTrack && !isCameraOff;
-  const statusLabel = participant.is_screen_sharing
-    ? "Sharing screen"
-    : showVideo
-      ? "Camera on"
-      : "Voice only";
+  const stateLabel = getParticipantTileStateLabel(participant, {
+    isCurrentUser,
+    showVideo,
+    isSpeaking,
+  });
+  const stripLabel = getParticipantStripLabel(participant, { showVideo, isSpeaking });
 
   useEffect(() => {
     if (!videoRef.current || !cameraTrack || !showVideo) {
@@ -222,34 +304,25 @@ const VoiceTile: React.FC<{
     <div
       ref={containerRef}
       onClick={onSelect}
-      className={`relative overflow-hidden rounded-xl bg-gray-800 shadow-lg ${getSpeakingTileClasses(isSpeaking)} ${
-        className ?? "aspect-video"
+      className={`relative flex flex-col overflow-hidden border-[3px] border-[var(--pc-border)] bg-[var(--pc-surface)] p-[3px] ${getSpeakingTileClasses(isSpeaking)} ${
+        className ?? "min-h-[16rem]"
       } ${onSelect ? "cursor-pointer" : ""}`}
     >
       {!isCurrentUser && <audio ref={audioRef} autoPlay playsInline />}
-      {showVideo ? (
-        <video
-          ref={videoRef}
-          autoPlay
-          playsInline
-          muted={isCurrentUser}
-          className="w-full h-full object-cover"
-        />
-      ) : (
-        <div className="w-full h-full flex items-center justify-center">
-          <div className="w-16 h-16 rounded-full bg-primary/30 flex items-center justify-center">
-            <span className="text-2xl font-bold text-white">{initials}</span>
-          </div>
-        </div>
-      )}
 
-      {showVideo && (canFocus || canFullscreen) && (
-        <div className="absolute left-3 top-3 z-10 flex items-center gap-2">
+      {(canFocus || canFullscreen) && (
+        <div className="absolute right-5 top-5 z-10 flex items-center gap-2">
           {canFocus && onFocusToggle && (
             <TileActionButton
               label={isFocused ? "Exit focus" : "Expand"}
               onClick={onFocusToggle}
-              icon={isFocused ? <Minimize2 className="h-3.5 w-3.5" /> : <Maximize2 className="h-3.5 w-3.5" />}
+              icon={
+                isFocused ? (
+                  <Minimize2 className="h-3.5 w-3.5" />
+                ) : (
+                  <Maximize2 className="h-3.5 w-3.5" />
+                )
+              }
             />
           )}
           {canFullscreen && (
@@ -268,33 +341,37 @@ const VoiceTile: React.FC<{
         </div>
       )}
 
-      <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/70 to-transparent p-3">
-        <div className="flex items-center justify-between">
-          <div className="text-white">
-            <div className="font-medium">{isCurrentUser ? "You" : participant.username}</div>
-            <div className="text-xs text-white/70">{statusLabel}</div>
+      <div className="flex min-h-0 flex-1 items-center justify-center bg-[var(--pc-surface)]">
+        {showVideo ? (
+          <video
+            ref={videoRef}
+            autoPlay
+            playsInline
+            muted={isCurrentUser}
+            className="h-full w-full object-cover"
+          />
+        ) : (
+          <div className="flex h-16 w-16 items-center justify-center border-2 border-[var(--pc-border)] bg-[var(--pc-panel)] font-mono text-[30px] font-bold text-[var(--pc-text)]">
+            {initials}
           </div>
-          <div className="flex items-center gap-2">
-            {participant.is_mic_enabled ? (
-              <Mic className="w-4 h-4 text-green-300" />
-            ) : (
-              <MicOff className="w-4 h-4 text-red-400" />
-            )}
-            {showVideo ? (
-              <Video className="w-4 h-4 text-green-300" />
-            ) : (
-              <VideoOff className="w-4 h-4 text-red-400" />
-            )}
-            {participant.is_screen_sharing && <Monitor className="w-4 h-4 text-blue-300" />}
+        )}
+      </div>
+
+      <div className="flex items-center justify-between border-t-2 border-[var(--pc-border)] bg-[var(--pc-surface-2)] px-[10px] py-2">
+        <div className="min-w-0">
+          <div className="truncate text-xs font-semibold text-[var(--pc-text)]">
+            {isCurrentUser ? "You" : participant.username}
+          </div>
+          <div className="font-mono text-[10px] text-[var(--pc-text)]">{stateLabel}</div>
+        </div>
+        <div className="flex items-center gap-2">
+          <StatusBadge label="M" enabled={participant.is_mic_enabled} />
+          <StatusBadge label="C" enabled={showVideo} />
+          <div className="font-mono text-[9px] uppercase tracking-[0.14em] text-[var(--pc-text)]">
+            {stripLabel}
           </div>
         </div>
       </div>
-
-      {isCurrentUser && (
-        <div className="absolute top-2 right-2 bg-primary rounded px-2 py-0.5">
-          <span className="text-xs font-medium text-white">You</span>
-        </div>
-      )}
     </div>
   );
 };
@@ -401,26 +478,25 @@ const ScreenShareTile: React.FC<{
     <div
       ref={containerRef}
       onClick={onSelect}
-      className={`relative overflow-hidden rounded-xl bg-gray-950 shadow-lg ring-1 ring-blue-400/40 ${getSpeakingTileClasses(isSpeaking)} ${
-        className ?? "aspect-video"
+      className={`relative flex flex-col overflow-hidden border-[3px] border-[var(--pc-border)] bg-[var(--pc-surface)] p-[3px] ${getSpeakingTileClasses(isSpeaking)} ${
+        className ?? "min-h-[16rem]"
       } ${onSelect ? "cursor-pointer" : ""}`}
     >
-      <video
-        ref={videoRef}
-        autoPlay
-        playsInline
-        muted
-        className="w-full h-full object-contain bg-black"
-      />
-      {!isCurrentUser && <audio ref={audioRef} autoPlay />}
+      {!isCurrentUser && <audio ref={audioRef} autoPlay playsInline />}
 
       {(canFocus || canFullscreen) && (
-        <div className="absolute left-3 top-3 z-10 flex items-center gap-2">
+        <div className="absolute right-5 top-5 z-10 flex items-center gap-2">
           {canFocus && onFocusToggle && (
             <TileActionButton
               label={isFocused ? "Exit focus" : "Expand"}
               onClick={onFocusToggle}
-              icon={isFocused ? <Minimize2 className="h-3.5 w-3.5" /> : <Maximize2 className="h-3.5 w-3.5" />}
+              icon={
+                isFocused ? (
+                  <Minimize2 className="h-3.5 w-3.5" />
+                ) : (
+                  <Maximize2 className="h-3.5 w-3.5" />
+                )
+              }
             />
           )}
           {canFullscreen && (
@@ -439,13 +515,28 @@ const ScreenShareTile: React.FC<{
         </div>
       )}
 
-      <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/80 to-transparent p-3">
-        <div className="flex items-center justify-between">
-          <div className="text-white">
-            <div className="font-medium">{participant.username} is sharing</div>
-            <div className="text-xs text-white/70">Screen share</div>
+      <div className="flex min-h-0 flex-1 items-center justify-center bg-[var(--pc-surface)]">
+        <video
+          ref={videoRef}
+          autoPlay
+          playsInline
+          muted
+          className="h-full w-full object-contain"
+        />
+      </div>
+
+      <div className="flex items-center justify-between border-t-2 border-[var(--pc-border)] bg-[var(--pc-surface-2)] px-[10px] py-2">
+        <div className="min-w-0">
+          <div className="truncate text-xs font-semibold text-[var(--pc-text)]">
+            {isCurrentUser ? "You" : participant.username}
           </div>
-          <Monitor className="w-4 h-4 text-blue-300" />
+          <div className="font-mono text-[10px] text-[var(--pc-text)]">Screen share</div>
+        </div>
+        <div className="flex items-center gap-2">
+          <StatusBadge label="S" enabled />
+          <div className="font-mono text-[9px] uppercase tracking-[0.14em] text-[var(--pc-text)]">
+            {isSpeaking ? "Share audio" : "Share live"}
+          </div>
         </div>
       </div>
     </div>
@@ -556,10 +647,7 @@ export default function RoomPage(): JSX.Element {
     roomVoiceState.roomId === roomIdentifier && roomVoiceState.status !== "idle";
   const inVoice = Boolean(roomState?.in_voice) || isCurrentRoomSession;
   const liveParticipantsByUserId = useMemo(
-    () =>
-      new Map(
-        roomVoiceState.participants.map((participant) => [participant.identity, participant])
-      ),
+    () => new Map(roomVoiceState.participants.map((participant) => [participant.identity, participant])),
     [roomVoiceState.participants]
   );
   const localVideoTrack = getLocalVideoTrack();
@@ -568,22 +656,25 @@ export default function RoomPage(): JSX.Element {
     () => voiceParticipants.find((participant) => participant.user_id === user?.user_id) ?? null,
     [voiceParticipants, user?.user_id]
   );
-  const displayedVoiceParticipants = voiceParticipants.length > 0
-    ? voiceParticipants
-    : isCurrentRoomSession && user
-      ? [{
-          id: user.id,
-          user_id: user.user_id,
-          username: user.username,
-          name: user.name,
-          is_online: user.is_online,
-          is_mic_enabled: !roomVoiceState.localMuted,
-          is_camera_enabled: !roomVoiceState.localCameraOff,
-          is_screen_sharing: roomVoiceState.screenSharing,
-          joined_at: new Date().toISOString(),
-          updated_at: new Date().toISOString(),
-        }]
-      : [];
+  const displayedVoiceParticipants =
+    voiceParticipants.length > 0
+      ? voiceParticipants
+      : isCurrentRoomSession && user
+        ? [
+            {
+              id: user.id,
+              user_id: user.user_id,
+              username: user.username,
+              name: user.name,
+              is_online: user.is_online,
+              is_mic_enabled: !roomVoiceState.localMuted,
+              is_camera_enabled: !roomVoiceState.localCameraOff,
+              is_screen_sharing: roomVoiceState.screenSharing,
+              joined_at: new Date().toISOString(),
+              updated_at: new Date().toISOString(),
+            },
+          ]
+        : [];
 
   const screenShareTiles = useMemo(
     () =>
@@ -595,10 +686,9 @@ export default function RoomPage(): JSX.Element {
             isLocalParticipant && isCurrentRoomSession
               ? roomVoiceState.screenSharing
               : participant.is_screen_sharing;
-          const screenShareTrack =
-            isLocalParticipant
-              ? localScreenShareTrack ?? liveParticipant?.screenShareTrack
-              : liveParticipant?.screenShareTrack;
+          const screenShareTrack = isLocalParticipant
+            ? localScreenShareTrack ?? liveParticipant?.screenShareTrack
+            : liveParticipant?.screenShareTrack;
           const screenShareAudioTrack = liveParticipant?.screenShareAudioTrack;
 
           if (!isActivelySharing || !screenShareTrack) {
@@ -629,6 +719,7 @@ export default function RoomPage(): JSX.Element {
       user?.user_id,
     ]
   );
+
   const visualTiles = useMemo<VisualTile[]>(
     () => [
       ...displayedVoiceParticipants.flatMap((participant) => {
@@ -642,12 +733,14 @@ export default function RoomPage(): JSX.Element {
           return [];
         }
 
-        return [{
-          id: `camera:${participant.user_id}`,
-          kind: "camera" as const,
-          participant,
-          track: cameraTrack,
-        }];
+        return [
+          {
+            id: `camera:${participant.user_id}`,
+            kind: "camera" as const,
+            participant,
+            track: cameraTrack,
+          },
+        ];
       }),
       ...screenShareTiles.map(({ participant, screenShareTrack, screenShareAudioTrack }) => ({
         id: `screen-share:${participant.user_id}`,
@@ -659,6 +752,7 @@ export default function RoomPage(): JSX.Element {
     ],
     [displayedVoiceParticipants, liveParticipantsByUserId, localVideoTrack, screenShareTiles, user?.user_id]
   );
+
   const focusedTile = focusedTileId
     ? visualTiles.find((tile) => tile.id === focusedTileId) ?? null
     : null;
@@ -812,33 +906,38 @@ export default function RoomPage(): JSX.Element {
     }
   }, [clearRoomVoiceError, roomVoiceState.error]);
 
-  const getGridClass = () => {
-    const count = Math.max(displayedVoiceParticipants.length + screenShareTiles.length, 1);
-    if (count <= 1) return "grid-cols-1";
-    if (count === 2) return "grid-cols-2";
-    if (count <= 4) return "grid-cols-2";
-    if (count <= 6) return "grid-cols-3";
-    return "grid-cols-4";
-  };
+  const stageColumnsClass = (() => {
+    const tileCount = displayedVoiceParticipants.length + screenShareTiles.length;
+    if (tileCount <= 1) return "grid-cols-1";
+    if (tileCount === 2) return "grid-cols-1 xl:grid-cols-2";
+    return "grid-cols-1 lg:grid-cols-3";
+  })();
+
+  const inVoiceMemberIds = new Set(displayedVoiceParticipants.map((participant) => participant.user_id));
+  const roomTitle = `POWER-CALL ${roomName}`.toUpperCase();
 
   if (isLoading) {
     return (
-      <div className="flex flex-col h-screen items-center justify-center bg-gray-50">
-        <div className="w-10 h-10 border-4 border-primary border-t-transparent rounded-full animate-spin mb-4" />
-        <p className="text-gray-600">Loading room...</p>
+      <div className="flex h-screen items-center justify-center bg-[var(--pc-bg)] text-[var(--pc-text)]">
+        <div className="text-center">
+          <div className="mx-auto mb-4 h-10 w-10 animate-spin border-2 border-[var(--pc-border)] border-t-transparent" />
+          <p className="font-mono text-sm uppercase tracking-[0.2em]">Loading room...</p>
+        </div>
       </div>
     );
   }
 
   if (error && !roomState) {
     return (
-      <div className="flex flex-col h-screen items-center justify-center bg-gray-50 p-4">
-        <div className="text-center max-w-md">
-          <h2 className="text-xl font-semibold text-red-600 mb-2">Room Error</h2>
-          <p className="text-gray-600 mb-4">{error}</p>
+      <div className="flex h-screen items-center justify-center bg-[var(--pc-bg)] px-4 text-[var(--pc-text)]">
+        <div className={`w-full max-w-xl p-6 ${shellClass}`}>
+          <div className={`${monoMetaClass} mb-3`}>Power-Call // Error</div>
+          <h2 className="mb-3 text-xl font-semibold">Room Error</h2>
+          <p className="mb-6 text-sm text-[var(--pc-text-muted)]">{error}</p>
           <button
+            type="button"
             onClick={() => navigate(-1)}
-            className="px-4 py-2 rounded bg-primary text-white"
+            className="border-2 border-[var(--pc-border)] bg-[var(--pc-action-inverse-bg)] px-4 py-2 font-mono text-sm font-bold uppercase tracking-[0.18em] text-[var(--pc-action-inverse-text)]"
           >
             Go Back
           </button>
@@ -848,344 +947,327 @@ export default function RoomPage(): JSX.Element {
   }
 
   return (
-    <div className="flex flex-col h-screen bg-gray-900">
-      <header className="flex items-center justify-between px-4 py-3 bg-gray-800 border-b border-gray-700">
-        <div className="flex items-center gap-3">
-          <button
-            onClick={() => navigate(-1)}
-            className="p-2 rounded-lg hover:bg-gray-700 transition-colors"
-          >
-            <ArrowLeft className="w-5 h-5 text-white" />
-          </button>
-          <div>
-            <h1 className="text-lg font-semibold text-white">Room: {roomName}</h1>
-            <p className="text-sm text-white/70">
-              {members.length} members, {displayedVoiceParticipants.length} in voice
-            </p>
-          </div>
-        </div>
-
-        <div className="flex items-center gap-3">
-          <div className="flex items-center gap-2 text-white/80">
-            <Users className="w-4 h-4" />
-            <span className="text-sm">{members.length}</span>
-          </div>
-          {inVoice ? (
+    <div className="flex min-h-full flex-1 flex-col bg-[var(--pc-bg)] text-[var(--pc-text)]">
+      <main className="flex min-w-0 flex-1 flex-col">
+        <header className={`flex min-h-16 items-center justify-between px-4 ${shellClass} border-l-0 border-r-0 border-t-0`}>
+          <div className="flex min-w-0 items-center gap-3">
             <button
-              onClick={handleLeaveVoice}
-              disabled={isSubmitting}
-              className="flex items-center gap-2 px-4 py-2 bg-red-500 hover:bg-red-600 rounded-lg transition-colors disabled:opacity-50"
+              type="button"
+              onClick={() => navigate(-1)}
+              className="flex h-10 w-10 items-center justify-center border-2 border-[var(--pc-border)] bg-[var(--pc-action-bg)] transition-colors hover:bg-[var(--pc-action-hover)]"
+              title="Back"
             >
-              <PhoneOff className="w-4 h-4 text-white" />
-              <span className="text-white text-sm font-medium">Leave Voice</span>
+              <ArrowLeft className="h-4 w-4" />
             </button>
-          ) : (
-            <button
-              onClick={handleJoinVoice}
-              disabled={isSubmitting}
-              className="flex items-center gap-2 px-4 py-2 bg-green-500 hover:bg-green-600 rounded-lg transition-colors disabled:opacity-50"
-            >
-              <Radio className="w-4 h-4 text-white" />
-              <span className="text-white text-sm font-medium">Join Voice</span>
-            </button>
-          )}
-        </div>
-      </header>
-
-      <main className="flex-1 overflow-hidden">
-        <div className="h-full flex flex-col">
-          <div className="flex-1 p-4 overflow-auto">
-              {displayedVoiceParticipants.length === 0 ? (
-              <div className="h-full flex items-center justify-center">
-                <div className="text-center max-w-md p-8">
-                  <div className="w-20 h-20 rounded-full bg-gray-800 flex items-center justify-center mx-auto mb-6">
-                    <Radio className="w-10 h-10 text-gray-500" />
-                  </div>
-                  <h2 className="text-xl font-semibold text-white mb-2">Voice channel is empty</h2>
-                  <p className="text-gray-400 mb-6">
-                    Join the room voice channel to start talking, turn on camera, or share your screen.
-                  </p>
-                  {!inVoice && (
-                    <button
-                      onClick={handleJoinVoice}
-                      disabled={isSubmitting}
-                      className="flex items-center gap-2 px-6 py-3 bg-primary hover:bg-primary-hover rounded-lg transition-colors mx-auto disabled:opacity-50"
-                    >
-                      <Radio className="w-5 h-5 text-white" />
-                      <span className="text-white font-medium">Join Voice</span>
-                    </button>
-                  )}
-                </div>
+            <div className="min-w-0">
+              <div className="truncate font-mono text-sm font-bold uppercase tracking-[0.16em]">
+                {roomTitle}
               </div>
-            ) : focusedTile ? (
-              <div className="flex h-full min-h-0 flex-col gap-4">
-                <div className="min-h-0 flex-1">
-                  {focusedTile.kind === "camera" ? (
-                    <VoiceTile
-                      participant={focusedTile.participant}
-                      isCurrentUser={focusedTile.participant.user_id === user?.user_id}
-                      isCameraOff={false}
-                      cameraTrack={focusedTile.track}
-                      audioTrack={liveParticipantsByUserId.get(focusedTile.participant.user_id)?.audioTrack}
-                      className="h-full min-h-[22rem]"
-                      isFocused
-                      canFocus
-                      canFullscreen
-                      isSpeaking={isParticipantHighlighted(
-                        focusedTile.participant,
-                        liveParticipantsByUserId.get(focusedTile.participant.user_id)?.identity,
-                        activeSpeakerIds
-                      )}
-                      onFocusToggle={() => setFocusedTileId(null)}
-                      onFullscreenError={setError}
-                    />
-                  ) : (
-                    <ScreenShareTile
-                      participant={focusedTile.participant}
-                      screenShareTrack={focusedTile.track}
-                      screenShareAudioTrack={focusedTile.audioTrack}
-                      isCurrentUser={focusedTile.participant.user_id === user?.user_id}
-                      className="h-full min-h-[22rem]"
-                      isFocused
-                      canFocus
-                      canFullscreen
-                      isSpeaking={isParticipantHighlighted(
-                        focusedTile.participant,
-                        liveParticipantsByUserId.get(focusedTile.participant.user_id)?.identity,
-                        activeScreenShareSpeakerIds
-                      )}
-                      onFocusToggle={() => setFocusedTileId(null)}
-                      onFullscreenError={setError}
-                    />
-                  )}
-                </div>
+              <div className="truncate font-mono text-[11px] uppercase tracking-[0.16em] text-[var(--pc-text-soft)]">
+                Voice channel // live session
+              </div>
+            </div>
+          </div>
 
-                <div className="shrink-0">
-                  <div className="mb-2 flex items-center justify-between">
-                    <p className="text-sm font-medium text-white/80">Other tiles</p>
-                    <button
-                      type="button"
-                      onClick={() => setFocusedTileId(null)}
-                      className="rounded-md bg-gray-800 px-3 py-1.5 text-sm font-medium text-white transition-colors hover:bg-gray-700"
-                    >
-                      Exit focus
-                    </button>
-                  </div>
-                  <div className="flex gap-3 overflow-x-auto pb-2">
-                    {focusStripTiles.map((tile) => {
-                      if (tile.kind === "participant") {
-                        const liveParticipant = liveParticipantsByUserId.get(tile.participant.user_id);
-                        const isSpeaking = isParticipantHighlighted(
-                          tile.participant,
-                          liveParticipant?.identity,
-                          activeSpeakerIds
-                        );
-                        return (
-                          <div key={`participant-strip:${tile.participant.user_id}`} className="w-72 shrink-0">
-                            <VoiceTile
-                              participant={tile.participant}
-                              isCurrentUser={tile.participant.user_id === user?.user_id}
-                              isCameraOff={liveParticipant?.isCameraOff}
-                              cameraTrack={
-                                tile.participant.user_id === user?.user_id
-                                  ? localVideoTrack ?? liveParticipant?.cameraTrack
-                                  : liveParticipant?.cameraTrack
-                              }
-                              audioTrack={liveParticipant?.audioTrack}
-                              className="aspect-video"
-                              isSpeaking={isSpeaking}
-                              canFocus={Boolean(
-                                (tile.participant.user_id === user?.user_id
-                                  ? localVideoTrack ?? liveParticipant?.cameraTrack
-                                  : liveParticipant?.cameraTrack) && !liveParticipant?.isCameraOff
-                              )}
-                              canFullscreen={Boolean(
-                                (tile.participant.user_id === user?.user_id
-                                  ? localVideoTrack ?? liveParticipant?.cameraTrack
-                                  : liveParticipant?.cameraTrack) && !liveParticipant?.isCameraOff
-                              )}
-                              onFocusToggle={() => setFocusedTileId(`camera:${tile.participant.user_id}`)}
-                              onSelect={
-                                (tile.participant.user_id === user?.user_id
-                                  ? localVideoTrack ?? liveParticipant?.cameraTrack
-                                  : liveParticipant?.cameraTrack) && !liveParticipant?.isCameraOff
-                                  ? () => setFocusedTileId(`camera:${tile.participant.user_id}`)
-                                  : undefined
-                              }
-                              onFullscreenError={setError}
-                            />
-                          </div>
-                        );
-                      }
+          <div className="flex items-center gap-2 sm:gap-[10px]">
+            <div className="flex h-9 items-center justify-center border-2 border-[var(--pc-border)] bg-[var(--pc-action-bg)] px-[10px] font-mono text-xs font-bold uppercase tracking-[0.14em]">
+              {formatOnlineCount(members.length)}
+            </div>
+            {inVoice ? (
+              <button
+                type="button"
+                onClick={() => void handleLeaveVoice()}
+                disabled={isSubmitting}
+                className="flex h-10 items-center justify-center border-2 border-[var(--pc-border)] bg-[var(--pc-action-inverse-bg)] px-[14px] font-mono text-[13px] font-bold uppercase tracking-[0.14em] text-[var(--pc-action-inverse-text)] transition-colors hover:bg-[var(--pc-action-inverse-hover)] disabled:opacity-40"
+              >
+                Leave
+              </button>
+            ) : (
+              <button
+                type="button"
+                onClick={() => void handleJoinVoice()}
+                disabled={isSubmitting}
+                className="flex h-10 items-center justify-center border-2 border-[var(--pc-border)] bg-[var(--pc-action-inverse-bg)] px-[14px] font-mono text-[13px] font-bold uppercase tracking-[0.14em] text-[var(--pc-action-inverse-text)] transition-colors hover:bg-[var(--pc-action-inverse-hover)] disabled:opacity-40"
+              >
+                Join
+              </button>
+            )}
+          </div>
+        </header>
+
+        <div className="flex min-h-0 flex-1 flex-col gap-3 p-[10px]">
+          {focusedTile ? (
+            <div className="flex min-h-0 flex-1 flex-col gap-3">
+              <div className="min-h-0 flex-1">
+                {focusedTile.kind === "camera" ? (
+                  <VoiceTile
+                    participant={focusedTile.participant}
+                    isCurrentUser={focusedTile.participant.user_id === user?.user_id}
+                    isCameraOff={false}
+                    cameraTrack={focusedTile.track}
+                    audioTrack={liveParticipantsByUserId.get(focusedTile.participant.user_id)?.audioTrack}
+                    className="h-full min-h-[24rem]"
+                    isFocused
+                    canFocus
+                    canFullscreen
+                    isSpeaking={isParticipantHighlighted(
+                      focusedTile.participant,
+                      liveParticipantsByUserId.get(focusedTile.participant.user_id)?.identity,
+                      activeSpeakerIds
+                    )}
+                    onFocusToggle={() => setFocusedTileId(null)}
+                    onFullscreenError={setError}
+                  />
+                ) : (
+                  <ScreenShareTile
+                    participant={focusedTile.participant}
+                    screenShareTrack={focusedTile.track}
+                    screenShareAudioTrack={focusedTile.audioTrack}
+                    isCurrentUser={focusedTile.participant.user_id === user?.user_id}
+                    className="h-full min-h-[24rem]"
+                    isFocused
+                    canFocus
+                    canFullscreen
+                    isSpeaking={isParticipantHighlighted(
+                      focusedTile.participant,
+                      liveParticipantsByUserId.get(focusedTile.participant.user_id)?.identity,
+                      activeScreenShareSpeakerIds
+                    )}
+                    onFocusToggle={() => setFocusedTileId(null)}
+                    onFullscreenError={setError}
+                  />
+                )}
+              </div>
+
+              {focusStripTiles.length > 0 && (
+                <div className="flex gap-3 overflow-x-auto pb-1">
+                  {focusStripTiles.map((tile) => {
+                    if (tile.kind === "participant") {
+                      const liveParticipant = liveParticipantsByUserId.get(tile.participant.user_id);
+                      const cameraTrack =
+                        tile.participant.user_id === user?.user_id
+                          ? localVideoTrack ?? liveParticipant?.cameraTrack
+                          : liveParticipant?.cameraTrack;
+                      const hasVisual = Boolean(cameraTrack) && !liveParticipant?.isCameraOff;
 
                       return (
                         <div
-                          key={`screen-share-strip:${tile.participant.user_id}`}
-                          className="w-72 shrink-0"
+                          key={`participant-strip:${tile.participant.user_id}`}
+                          className="w-[320px] min-w-[320px]"
                         >
-                          <ScreenShareTile
+                          <VoiceTile
                             participant={tile.participant}
-                            screenShareTrack={tile.screenShareTrack}
-                            screenShareAudioTrack={tile.screenShareAudioTrack}
                             isCurrentUser={tile.participant.user_id === user?.user_id}
-                            className="aspect-video"
-                            canFocus
-                            canFullscreen
+                            isCameraOff={liveParticipant?.isCameraOff}
+                            cameraTrack={cameraTrack}
+                            audioTrack={liveParticipant?.audioTrack}
+                            className="min-h-[13rem]"
                             isSpeaking={isParticipantHighlighted(
                               tile.participant,
-                              liveParticipantsByUserId.get(tile.participant.user_id)?.identity,
-                              activeScreenShareSpeakerIds
+                              liveParticipant?.identity,
+                              activeSpeakerIds
                             )}
-                            onFocusToggle={() => setFocusedTileId(`screen-share:${tile.participant.user_id}`)}
-                            onSelect={() => setFocusedTileId(`screen-share:${tile.participant.user_id}`)}
+                            canFocus={hasVisual}
+                            canFullscreen={hasVisual}
+                            onFocusToggle={() => setFocusedTileId(`camera:${tile.participant.user_id}`)}
+                            onSelect={hasVisual ? () => setFocusedTileId(`camera:${tile.participant.user_id}`) : undefined}
                             onFullscreenError={setError}
                           />
                         </div>
                       );
-                    })}
+                    }
+
+                    return (
+                      <div
+                        key={`screen-share-strip:${tile.participant.user_id}`}
+                        className="w-[320px] min-w-[320px]"
+                      >
+                        <ScreenShareTile
+                          participant={tile.participant}
+                          screenShareTrack={tile.screenShareTrack}
+                          screenShareAudioTrack={tile.screenShareAudioTrack}
+                          isCurrentUser={tile.participant.user_id === user?.user_id}
+                          className="min-h-[13rem]"
+                          canFocus
+                          canFullscreen
+                          isSpeaking={isParticipantHighlighted(
+                            tile.participant,
+                            liveParticipantsByUserId.get(tile.participant.user_id)?.identity,
+                            activeScreenShareSpeakerIds
+                          )}
+                          onFocusToggle={() => setFocusedTileId(`screen-share:${tile.participant.user_id}`)}
+                          onSelect={() => setFocusedTileId(`screen-share:${tile.participant.user_id}`)}
+                          onFullscreenError={setError}
+                        />
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          ) : (
+            <div className={`grid ${stageColumnsClass} gap-[10px]`}>
+              {displayedVoiceParticipants.length === 0 ? (
+                <div className={`col-span-full flex min-h-[20rem] items-center justify-center p-8 ${shellClass}`}>
+                  <div className="text-center">
+                    <div className="mx-auto mb-4 flex h-16 w-16 items-center justify-center border-2 border-[var(--pc-border)]">
+                      <Radio className="h-7 w-7" />
+                    </div>
+                    <div className="mb-2 font-mono text-sm font-bold uppercase tracking-[0.18em]">
+                      Voice channel is empty
+                    </div>
+                    <p className="mb-5 text-sm text-[var(--pc-text-muted)]">
+                      Join the room to start talking, turn on your camera, or share your screen.
+                    </p>
+                    {!inVoice && (
+                      <button
+                        type="button"
+                        onClick={() => void handleJoinVoice()}
+                        disabled={isSubmitting}
+                        className="border-2 border-[var(--pc-border)] bg-[var(--pc-action-inverse-bg)] px-5 py-3 font-mono text-xs font-bold uppercase tracking-[0.18em] text-[var(--pc-action-inverse-text)] disabled:opacity-40"
+                      >
+                        Join Voice
+                      </button>
+                    )}
                   </div>
                 </div>
-              </div>
-            ) : (
-              <div className={`grid ${getGridClass()} gap-4 h-full`}>
-                {displayedVoiceParticipants.map((participant) => (
-                  <VoiceTile
-                    key={participant.user_id}
-                    participant={participant}
-                    isCurrentUser={participant.user_id === user?.user_id}
-                    isCameraOff={liveParticipantsByUserId.get(participant.user_id)?.isCameraOff}
-                    cameraTrack={
+              ) : (
+                <>
+                  {displayedVoiceParticipants.map((participant) => {
+                    const liveParticipant = liveParticipantsByUserId.get(participant.user_id);
+                    const cameraTrack =
                       participant.user_id === user?.user_id
                         ? localVideoTrack ?? liveParticipantsByUserId.get(participant.user_id)?.cameraTrack
-                        : liveParticipantsByUserId.get(participant.user_id)?.cameraTrack
-                    }
-                    audioTrack={liveParticipantsByUserId.get(participant.user_id)?.audioTrack}
-                    isSpeaking={isParticipantHighlighted(
-                      participant,
-                      liveParticipantsByUserId.get(participant.user_id)?.identity,
-                      activeSpeakerIds
-                    )}
-                    canFocus={Boolean(
-                      (participant.user_id === user?.user_id
-                        ? localVideoTrack ?? liveParticipantsByUserId.get(participant.user_id)?.cameraTrack
-                        : liveParticipantsByUserId.get(participant.user_id)?.cameraTrack) &&
-                        !liveParticipantsByUserId.get(participant.user_id)?.isCameraOff
-                    )}
-                    canFullscreen={Boolean(
-                      (participant.user_id === user?.user_id
-                        ? localVideoTrack ?? liveParticipantsByUserId.get(participant.user_id)?.cameraTrack
-                        : liveParticipantsByUserId.get(participant.user_id)?.cameraTrack) &&
-                        !liveParticipantsByUserId.get(participant.user_id)?.isCameraOff
-                    )}
-                    onFocusToggle={() => setFocusedTileId(`camera:${participant.user_id}`)}
-                    onSelect={
-                      (participant.user_id === user?.user_id
-                        ? localVideoTrack ?? liveParticipantsByUserId.get(participant.user_id)?.cameraTrack
-                        : liveParticipantsByUserId.get(participant.user_id)?.cameraTrack) &&
-                        !liveParticipantsByUserId.get(participant.user_id)?.isCameraOff
-                        ? () => setFocusedTileId(`camera:${participant.user_id}`)
-                        : undefined
-                    }
-                    onFullscreenError={setError}
-                  />
-                ))}
-                {screenShareTiles.map(({ participant, screenShareTrack, screenShareAudioTrack }) => (
-                  <ScreenShareTile
-                    key={`${participant.user_id}-screen-share`}
-                    participant={participant}
-                    screenShareTrack={screenShareTrack}
-                    screenShareAudioTrack={screenShareAudioTrack}
-                    isCurrentUser={participant.user_id === user?.user_id}
-                    isSpeaking={isParticipantHighlighted(
-                      participant,
-                      liveParticipantsByUserId.get(participant.user_id)?.identity,
-                      activeScreenShareSpeakerIds
-                    )}
-                    canFocus
-                    canFullscreen
-                    onFocusToggle={() => setFocusedTileId(`screen-share:${participant.user_id}`)}
-                    onSelect={() => setFocusedTileId(`screen-share:${participant.user_id}`)}
-                    onFullscreenError={setError}
-                  />
-                ))}
-              </div>
-            )}
-          </div>
+                        : liveParticipantsByUserId.get(participant.user_id)?.cameraTrack;
+                    const hasVisual = Boolean(cameraTrack) && !liveParticipant?.isCameraOff;
 
-          <section className="px-4 py-3 bg-gray-850 border-t border-gray-700">
-            <h2 className="text-sm font-semibold text-white/80 mb-2">Room Members</h2>
-            <div className="flex flex-wrap gap-2">
-              {members.map((member) => {
-                const isInVoice = displayedVoiceParticipants.some(
-                  (participant) => participant.user_id === member.user_id
-                );
-                return (
-                  <div
-                    key={member.user_id}
-                    className={`px-3 py-2 rounded-lg text-sm ${
-                      isInVoice ? "bg-blue-500/20 text-blue-200" : "bg-gray-800 text-white/75"
-                    }`}
-                  >
-                    {member.username}
-                    {member.user_id === user?.user_id ? " (you)" : ""}
-                    {isInVoice ? " • in voice" : ""}
-                  </div>
-                );
-              })}
+                    return (
+                      <VoiceTile
+                        key={participant.user_id}
+                        participant={participant}
+                        isCurrentUser={participant.user_id === user?.user_id}
+                        isCameraOff={liveParticipant?.isCameraOff}
+                        cameraTrack={cameraTrack}
+                        audioTrack={liveParticipantsByUserId.get(participant.user_id)?.audioTrack}
+                        className="min-h-[15rem] lg:min-h-[13.5rem] xl:min-h-[15.5rem]"
+                        isSpeaking={isParticipantHighlighted(
+                          participant,
+                          liveParticipantsByUserId.get(participant.user_id)?.identity,
+                          activeSpeakerIds
+                        )}
+                        canFocus={hasVisual}
+                        canFullscreen={hasVisual}
+                        onFocusToggle={() => setFocusedTileId(`camera:${participant.user_id}`)}
+                        onSelect={hasVisual ? () => setFocusedTileId(`camera:${participant.user_id}`) : undefined}
+                        onFullscreenError={setError}
+                      />
+                    );
+                  })}
+                  {screenShareTiles.map(({ participant, screenShareTrack, screenShareAudioTrack }) => (
+                    <ScreenShareTile
+                      key={`${participant.user_id}-screen-share`}
+                      participant={participant}
+                      screenShareTrack={screenShareTrack}
+                      screenShareAudioTrack={screenShareAudioTrack}
+                      isCurrentUser={participant.user_id === user?.user_id}
+                      className="min-h-[15rem] lg:min-h-[13.5rem] xl:min-h-[15.5rem]"
+                      isSpeaking={isParticipantHighlighted(
+                        participant,
+                        liveParticipantsByUserId.get(participant.user_id)?.identity,
+                        activeScreenShareSpeakerIds
+                      )}
+                      canFocus
+                      canFullscreen
+                      onFocusToggle={() => setFocusedTileId(`screen-share:${participant.user_id}`)}
+                      onSelect={() => setFocusedTileId(`screen-share:${participant.user_id}`)}
+                      onFullscreenError={setError}
+                    />
+                  ))}
+                </>
+              )}
+            </div>
+          )}
+
+          <section className={`flex flex-col gap-3 p-[8px_12px] ${shellClass}`}>
+            <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
+              <div className="flex flex-wrap items-center gap-2">
+                <div className="mr-3 text-base font-semibold">Room Members</div>
+                {members.map((member) => {
+                  const isInVoice = inVoiceMemberIds.has(member.user_id);
+                  return (
+                    <div
+                      key={member.user_id}
+                      className="border-2 border-[var(--pc-border)] bg-[var(--pc-bg)] px-[10px] py-2 text-[13px] text-[var(--pc-text)]"
+                    >
+                      {member.username}
+                      {member.user_id === user?.user_id ? " (you)" : ""}
+                      {isInVoice ? " • in voice" : ""}
+                    </div>
+                  );
+                })}
+              </div>
+
+              <div className="flex items-center gap-[10px] xl:justify-end">
+                <ControlButton
+                  icon={<Mic className="h-4 w-4" />}
+                  activeIcon={<MicOff className="h-4 w-4" />}
+                  isActive={
+                    isCurrentRoomSession
+                      ? !roomVoiceState.localMuted
+                      : Boolean(myVoiceState?.is_mic_enabled)
+                  }
+                  disabled={!canToggleMedia}
+                  onClick={() => void handleToggleMic()}
+                  label={isCurrentRoomSession && roomVoiceState.localMuted ? "Unmute" : "Mute"}
+                />
+
+                <ControlButton
+                  icon={<Video className="h-4 w-4" />}
+                  activeIcon={<VideoOff className="h-4 w-4" />}
+                  isActive={
+                    isCurrentRoomSession
+                      ? !roomVoiceState.localCameraOff
+                      : Boolean(myVoiceState?.is_camera_enabled)
+                  }
+                  disabled={!canToggleMedia}
+                  onClick={() => void handleToggleCamera()}
+                  label={
+                    isCurrentRoomSession && roomVoiceState.localCameraOff
+                      ? "Turn on camera"
+                      : "Turn off camera"
+                  }
+                />
+
+                <ControlButton
+                  icon={<Monitor className="h-4 w-4" />}
+                  activeIcon={<MonitorOff className="h-4 w-4" />}
+                  isActive={
+                    isCurrentRoomSession
+                      ? roomVoiceState.screenSharing
+                      : Boolean(myVoiceState?.is_screen_sharing)
+                  }
+                  disabled={!canToggleMedia}
+                  onClick={() => void handleToggleScreenShare()}
+                  label={
+                    isCurrentRoomSession && roomVoiceState.screenSharing
+                      ? "Stop sharing"
+                      : "Share screen"
+                  }
+                />
+
+                <ControlButton
+                  icon={<PhoneOff className="h-4 w-4" />}
+                  isDanger
+                  disabled={!inVoice || isSubmitting}
+                  onClick={() => void handleLeaveVoice()}
+                  label="Leave voice"
+                />
+              </div>
             </div>
           </section>
 
-          <motion.div
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            className="flex items-center justify-center gap-4 p-4 bg-gray-800 border-t border-gray-700"
-          >
-            <ControlButton
-              icon={<Mic className="w-5 h-5 text-white" />}
-              activeIcon={<MicOff className="w-5 h-5 text-red-400" />}
-              isActive={isCurrentRoomSession ? !roomVoiceState.localMuted : Boolean(myVoiceState?.is_mic_enabled)}
-              disabled={!canToggleMedia}
-              onClick={() => void handleToggleMic()}
-              label={isCurrentRoomSession && roomVoiceState.localMuted ? "Unmute" : "Mute"}
-            />
-
-            <ControlButton
-              icon={<Video className="w-5 h-5 text-white" />}
-              activeIcon={<VideoOff className="w-5 h-5 text-red-400" />}
-              isActive={isCurrentRoomSession ? !roomVoiceState.localCameraOff : Boolean(myVoiceState?.is_camera_enabled)}
-              disabled={!canToggleMedia}
-              onClick={() => void handleToggleCamera()}
-              label={
-                isCurrentRoomSession && roomVoiceState.localCameraOff
-                  ? "Turn on camera"
-                  : "Turn off camera"
-              }
-            />
-
-            <ControlButton
-              icon={<Monitor className="w-5 h-5 text-white" />}
-              activeIcon={<MonitorOff className="w-5 h-5 text-red-400" />}
-              isActive={isCurrentRoomSession ? roomVoiceState.screenSharing : Boolean(myVoiceState?.is_screen_sharing)}
-              disabled={!canToggleMedia}
-              onClick={() => void handleToggleScreenShare()}
-              label={
-                isCurrentRoomSession && roomVoiceState.screenSharing
-                  ? "Stop sharing"
-                  : "Share screen"
-              }
-            />
-
-            <ControlButton
-              icon={<PhoneOff className="w-5 h-5 text-white" />}
-              isDanger
-              disabled={!inVoice || isSubmitting}
-              onClick={() => void handleLeaveVoice()}
-              label="Leave voice"
-            />
-          </motion.div>
-
           {error && (
-            <div className="px-4 py-2 bg-red-500/10 border-t border-red-400/30 text-red-200 text-sm">
+            <div className="border-2 border-[var(--pc-border)] bg-[var(--pc-danger-bg)] px-4 py-3 font-mono text-xs uppercase tracking-[0.14em] text-[var(--pc-text)]">
               {error}
             </div>
           )}

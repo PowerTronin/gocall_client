@@ -1,46 +1,44 @@
-import React, { useState, useEffect, useRef } from "react";
-import Button from "../components/Button"; // Простой UI-компонент кнопки
-import { Plus, MoreVertical } from "lucide-react";
+import React, { useEffect, useRef, useState } from "react";
+import { MoreVertical, Plus, Radio, UserPlus } from "lucide-react";
+import { useNavigate } from "react-router-dom";
+
 import { useAuth } from "../context/AuthContext";
+import { fetchFriends } from "../services/friends-api";
 import {
-  fetchMyRooms,
-  fetchInvitedRooms,
   createRoom,
   deleteRoom,
-  updateRoom,
+  fetchInvitedRooms,
+  fetchMyRooms,
   inviteFriendToRoom,
+  updateRoom,
 } from "../services/rooms-api";
-import { fetchFriends } from "../services/friends-api";
-import { useNavigate } from "react-router-dom";
-import { Room, Friend } from "../types";
+import { Friend, Room } from "../types";
+
+const panelClass = "border-2 border-[var(--pc-border)] bg-[var(--pc-panel)]";
+const actionButtonClass =
+  "inline-flex items-center justify-center border-2 border-[var(--pc-border)] px-3 py-2 font-mono text-[11px] font-bold uppercase tracking-[0.14em] transition-colors";
 
 const RoomsPage: React.FC = () => {
   const { token, user } = useAuth();
   const navigate = useNavigate();
-  // Состояния для комнат, приглашённых комнат, списка друзей
   const [rooms, setRooms] = useState<Room[]>([]);
   const [invitedRooms, setInvitedRooms] = useState<Room[]>([]);
   const [friends, setFriends] = useState<Friend[]>([]);
-  // Состояние для ввода нового названия комнаты
   const [newRoomName, setNewRoomName] = useState("");
-  // Состояния для отображения контекстного меню и модального окна приглашения
   const [activeRoomMenu, setActiveRoomMenu] = useState<string | null>(null);
   const [inviteModalOpen, setInviteModalOpen] = useState(false);
   const [inviteModalRoom, setInviteModalRoom] = useState<string | null>(null);
-
-  // Error state
   const [error, setError] = useState<string | null>(null);
 
-  // Загружаем данные (комнаты и друзей) при монтировании компонента
   useEffect(() => {
     const loadData = async () => {
       if (!token) return;
+
       try {
         const ownRooms = await fetchMyRooms(token);
         const invited = await fetchInvitedRooms(token);
         const fetchedFriends = await fetchFriends(token);
 
-        // Отмечаем комнаты: свои — is_owner = true, приглашённые — false
         const markedOwnRooms = ownRooms.map((room) => ({
           ...room,
           is_owner: room.user_id === user?.user_id,
@@ -50,98 +48,96 @@ const RoomsPage: React.FC = () => {
         setRooms(markedOwnRooms);
         setInvitedRooms(markedInvitedRooms);
         setFriends(fetchedFriends);
-      } catch (error) {
-        console.error("Error loading rooms and friends:", error);
+      } catch (loadError) {
+        console.error("Error loading rooms and friends:", loadError);
+        setError("Failed to load rooms");
       }
     };
-    loadData();
+
+    void loadData();
   }, [token, user?.user_id]);
 
-  // Объединяем списки комнат
   const allRooms: Room[] = [...rooms, ...invitedRooms];
   const getRoomDisplayName = (room: Room) =>
     room.name.startsWith("__direct__:") ? "Private voice room" : room.name;
 
-  // Функция создания новой комнаты
   const handleCreateRoom = async () => {
     if (!newRoomName.trim() || !token) return;
     setError(null);
+
     try {
       const newRoom = await createRoom(newRoomName, token);
-      // Отмечаем как свою комнату
       newRoom.is_owner = true;
       setRooms((prev) => [...prev, newRoom]);
       setNewRoomName("");
-    } catch (error: any) {
-      console.error("Failed to create room:", error.message);
-      setError(error.message || "Не удалось создать комнату");
+    } catch (createError: any) {
+      console.error("Failed to create room:", createError.message);
+      setError(createError.message || "Failed to create room");
     }
   };
 
-  // Функция удаления комнаты
   const handleDeleteRoom = async (roomId: string) => {
     if (!token) return;
+
     try {
       await deleteRoom(roomId, token);
       setRooms((prev) => prev.filter((room) => room.room_id !== roomId));
       setInvitedRooms((prev) => prev.filter((room) => room.room_id !== roomId));
       setActiveRoomMenu(null);
-    } catch (error: any) {
-      console.error("Failed to delete room:", error.message);
+    } catch (deleteError: any) {
+      console.error("Failed to delete room:", deleteError.message);
+      setError(deleteError.message || "Failed to delete room");
     }
   };
 
-  // Функция редактирования названия комнаты
   const handleEditRoom = async (roomId: string) => {
     if (!token) return;
-    const newName = window.prompt("Введите новое название комнаты:");
-    if (!newName) return;
+    const nextName = window.prompt("Enter a new room name:");
+    if (!nextName) return;
+
     try {
-      await updateRoom(roomId, newName, token);
+      await updateRoom(roomId, nextName, token);
       setRooms((prev) =>
-        prev.map((room) => (room.room_id === roomId ? { ...room, name: newName } : room))
+        prev.map((room) => (room.room_id === roomId ? { ...room, name: nextName } : room))
       );
       setInvitedRooms((prev) =>
-        prev.map((room) => (room.room_id === roomId ? { ...room, name: newName } : room))
+        prev.map((room) => (room.room_id === roomId ? { ...room, name: nextName } : room))
       );
       setActiveRoomMenu(null);
-    } catch (error: any) {
-      console.error("Failed to update room:", error.message);
+    } catch (updateError: any) {
+      console.error("Failed to update room:", updateError.message);
+      setError(updateError.message || "Failed to update room");
     }
   };
 
-  // Функция открытия модального окна для приглашения друга
   const handleInviteFriend = (roomId: string) => {
     setInviteModalRoom(roomId);
     setInviteModalOpen(true);
     setActiveRoomMenu(null);
   };
 
-  // Функция подтверждения приглашения друга (через модальное окно)
-  const handleConfirmInvite = async (friend: string) => {
+  const handleConfirmInvite = async (friendName: string) => {
     if (!token || !inviteModalRoom) return;
+
     try {
-      await inviteFriendToRoom(inviteModalRoom, friend, token);
-      alert(`Друг ${friend} приглашён в комнату!`);
+      await inviteFriendToRoom(inviteModalRoom, friendName, token);
       setInviteModalOpen(false);
-    } catch (error: any) {
-      console.error("Failed to invite friend:", error.message);
+    } catch (inviteError: any) {
+      console.error("Failed to invite friend:", inviteError.message);
+      setError(inviteError.message || "Failed to invite friend");
     }
   };
 
-  // Функция присоединения к комнате (навигация к RoomPage)
   const handleJoinRoom = (room: Room) => {
     navigate(`/room/${encodeURIComponent(room.room_id)}`, {
-      state: { roomName: room.name }
+      state: { roomName: room.name },
     });
   };
 
-  // Переключение отображения контекстного меню для комнаты
   const toggleContextMenu = (roomId: string) => {
     setActiveRoomMenu((prev) => (prev === roomId ? null : roomId));
   };
 
-  // Закрытие контекстного меню при клике вне его области
   const menuRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
@@ -154,139 +150,215 @@ const RoomsPage: React.FC = () => {
   }, []);
 
   return (
-    <div>
-      <h1 className="text-2xl font-bold mb-4">Комнаты</h1>
-
-      {/* Секция создания комнаты */}
-      <div className="mb-6 flex gap-2">
-        <input
-          type="text"
-          placeholder="Название новой комнаты"
-          value={newRoomName}
-          onChange={(e) => setNewRoomName(e.target.value)}
-          className="border p-2 rounded flex-1"
-        />
-        <Button variant="primary" onClick={handleCreateRoom}>
-          <Plus className="h-4 w-4 mr-2" />
-          Создать
-        </Button>
-      </div>
-
-      {/* Error display */}
-      {error && (
-        <div className="mb-4 p-3 bg-red-100 border border-red-400 text-red-700 rounded">
-          {error}
-        </div>
-      )}
-
-      {/* Отображение списка комнат */}
-      {allRooms.length === 0 ? (
-        <p className="text-gray-500">
-          Нет комнат. Создайте новую комнату или ждите приглашения.
-        </p>
-      ) : (
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-          {allRooms.map((room) => (
-            <div
-              key={room.room_id}
-              className={`relative p-4 rounded-lg shadow ${
-                room.is_owner ? "border-2 border-blue-500" : "border-2 border-green-500"
-              }`}
-            >
-              <div className="mb-2">
-                <h3 className="font-medium">{getRoomDisplayName(room)}</h3>
-              </div>
-              <div className="flex justify-between items-center">
-                <Button
-                  variant="secondary"
-                  size="sm"
-                  onClick={() => handleJoinRoom(room)}
-                >
-                  Присоединиться
-                </Button>
-                <button onClick={() => toggleContextMenu(room.room_id)}>
-                  <MoreVertical className="h-5 w-5" />
-                </button>
-              </div>
-              {/* Контекстное меню быстрых действий */}
-              {activeRoomMenu === room.room_id && (
-                <div
-                  ref={menuRef}
-                  className="absolute right-2 top-10 bg-white bg-opacity-80 backdrop-blur-sm rounded-lg shadow-md z-10 p-2"
-                >
-                  {room.is_owner ? (
-                    <>
-                      <button
-                        className="flex items-center gap-2 px-2 py-1 hover:bg-gray-200 rounded"
-                        onClick={() => handleDeleteRoom(room.room_id)}
-                      >
-                        <span>Удалить комнату</span>
-                      </button>
-                      <button
-                        className="flex items-center gap-2 px-2 py-1 hover:bg-gray-200 rounded"
-                        onClick={() => handleEditRoom(room.room_id)}
-                      >
-                        <span>Редактировать название</span>
-                      </button>
-                      <button
-                        className="flex items-center gap-2 px-2 py-1 hover:bg-gray-200 rounded"
-                        onClick={() => handleInviteFriend(room.room_id)}
-                      >
-                        <span>Пригласить друга</span>
-                      </button>
-                    </>
-                  ) : (
-                    <>
-                      <button
-                        className="flex items-center gap-2 px-2 py-1 hover:bg-gray-200 rounded"
-                        onClick={() => handleInviteFriend(room.room_id)}
-                      >
-                        <span>Пригласить друга</span>
-                      </button>
-                    </>
-                  )}
-                </div>
-              )}
+    <div className="space-y-6 text-[var(--pc-text)]">
+      <section className={`${panelClass} p-5`}>
+        <div className="mb-4 flex flex-col gap-3 xl:flex-row xl:items-end xl:justify-between">
+          <div>
+            <div className="font-mono text-[11px] font-bold uppercase tracking-[0.18em] text-[var(--pc-text-muted)]">
+              Power-Call // Rooms
             </div>
-          ))}
-        </div>
-      )}
+            <h1 className="mt-2 text-3xl font-semibold">Room Directory</h1>
+            <p className="mt-1 text-sm text-[var(--pc-text-muted)]">
+              Create, join, and manage persistent voice rooms.
+            </p>
+          </div>
 
-      {/* Модальное окно для приглашения друга */}
-      {inviteModalOpen && (
-        <div className="fixed inset-0 flex items-center justify-center z-50">
-          {/* Полупрозрачный фон */}
-          <div
-            className="absolute inset-0 bg-black opacity-50"
-            onClick={() => setInviteModalOpen(false)}
-          ></div>
-          <div className="bg-white p-4 rounded-lg z-10 w-80">
-            <h3 className="text-lg font-bold mb-4">Пригласить друга</h3>
-            {friends.length === 0 ? (
-              <p>Нет друзей для приглашения</p>
-            ) : (
-              <ul>
-                {friends.map((friend) => (
-                  <li
-                    key={friend.user_id}
-                    className="flex justify-between items-center p-2 hover:bg-gray-100 rounded"
-                  >
-                    <span>{friend.username}</span>
-                    <Button
-                      variant="primary"
-                      size="sm"
-                      onClick={() => handleConfirmInvite(friend.username)}
+          <div className="flex w-full max-w-2xl gap-3">
+            <input
+              type="text"
+              placeholder="Enter a new room name"
+              value={newRoomName}
+              onChange={(event) => setNewRoomName(event.target.value)}
+              className="min-w-0 flex-1 border-2 border-[var(--pc-border)] bg-[var(--pc-bg)] px-4 py-3 text-sm text-[var(--pc-text)] outline-none placeholder:text-[var(--pc-text-subtle)]"
+            />
+            <button
+              type="button"
+              onClick={() => void handleCreateRoom()}
+              className={`${actionButtonClass} gap-2 bg-[var(--pc-action-inverse-bg)] text-[var(--pc-action-inverse-text)] hover:bg-[var(--pc-action-inverse-hover)]`}
+            >
+              <Plus className="h-4 w-4" />
+              Create
+            </button>
+          </div>
+        </div>
+
+        {error && (
+          <div className="border-2 border-[var(--pc-border)] bg-[var(--pc-danger-bg)] px-4 py-3 font-mono text-xs uppercase tracking-[0.14em] text-[var(--pc-text)]">
+            {error}
+          </div>
+        )}
+      </section>
+
+      <section className={`${panelClass} p-5`}>
+        <div className="mb-4 flex items-center justify-between">
+          <div>
+            <div className="font-mono text-[11px] font-bold uppercase tracking-[0.16em] text-[var(--pc-text-muted)]">
+              Active Space
+            </div>
+            <h2 className="mt-2 text-xl font-semibold">Rooms</h2>
+          </div>
+          <div className="font-mono text-xs uppercase tracking-[0.14em] text-[var(--pc-text-soft)]">
+            {allRooms.length} total
+          </div>
+        </div>
+
+        {allRooms.length === 0 ? (
+          <div className="border-2 border-[var(--pc-border)] bg-[var(--pc-bg)] p-8 text-center">
+            <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center border-2 border-[var(--pc-border)]">
+              <Radio className="h-6 w-6" />
+            </div>
+            <div className="font-mono text-sm font-bold uppercase tracking-[0.18em]">
+              No rooms yet
+            </div>
+            <p className="mt-2 text-sm text-[var(--pc-text-muted)]">
+              Create a room or wait for an invite.
+            </p>
+          </div>
+        ) : (
+          <div className="grid gap-4 xl:grid-cols-2 2xl:grid-cols-3">
+            {allRooms.map((room) => (
+              <div
+                key={room.room_id}
+                className={`relative flex min-h-[200px] flex-col justify-between border-2 p-4 ${
+                  room.is_owner ? "border-[var(--pc-border)] bg-[var(--pc-surface-strong)]" : "border-[var(--pc-border)] bg-[var(--pc-surface)]"
+                }`}
+              >
+                <div>
+                  <div className="mb-3 flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <div className="font-mono text-[11px] font-bold uppercase tracking-[0.16em] text-[var(--pc-text-soft)]">
+                        {room.is_owner ? "Owned room" : "Invited room"}
+                      </div>
+                      <h3 className="mt-2 break-words text-lg font-semibold text-[var(--pc-text)]">
+                        {getRoomDisplayName(room)}
+                      </h3>
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={() => toggleContextMenu(room.room_id)}
+                      className="flex h-9 w-9 shrink-0 items-center justify-center border-2 border-[var(--pc-border)] bg-[var(--pc-bg)] transition-colors hover:bg-[var(--pc-action-hover)]"
+                      title="Room actions"
                     >
-                      Пригласить
-                    </Button>
-                  </li>
+                      <MoreVertical className="h-4 w-4" />
+                    </button>
+                  </div>
+
+                  <div className="font-mono text-[11px] uppercase tracking-[0.14em] text-[var(--pc-text-soft)]">
+                    Room ID
+                  </div>
+                  <div className="mt-1 break-all text-sm text-[var(--pc-text-muted)]">{room.room_id}</div>
+                </div>
+
+                <div className="mt-5 flex items-center justify-between gap-3">
+                  <button
+                    type="button"
+                    onClick={() => handleJoinRoom(room)}
+                    className={`${actionButtonClass} bg-[var(--pc-action-inverse-bg)] text-[var(--pc-action-inverse-text)] hover:bg-[var(--pc-action-inverse-hover)]`}
+                  >
+                    Join Room
+                  </button>
+                  <div className="font-mono text-[11px] uppercase tracking-[0.14em] text-[var(--pc-text-subtle)]">
+                    {room.type || "voice"}
+                  </div>
+                </div>
+
+                {activeRoomMenu === room.room_id && (
+                  <div
+                    ref={menuRef}
+                    className="absolute right-4 top-14 z-20 w-56 border-2 border-[var(--pc-border)] bg-[var(--pc-bg)] p-2 shadow-[0_12px_30px_rgba(0,0,0,0.4)]"
+                  >
+                    {room.is_owner ? (
+                      <>
+                        <button
+                          type="button"
+                          className="flex w-full items-center px-3 py-2 text-left text-sm transition-colors hover:bg-[var(--pc-surface-strong)]"
+                          onClick={() => void handleDeleteRoom(room.room_id)}
+                        >
+                          Delete room
+                        </button>
+                        <button
+                          type="button"
+                          className="flex w-full items-center px-3 py-2 text-left text-sm transition-colors hover:bg-[var(--pc-surface-strong)]"
+                          onClick={() => void handleEditRoom(room.room_id)}
+                        >
+                          Rename room
+                        </button>
+                        <button
+                          type="button"
+                          className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm transition-colors hover:bg-[var(--pc-surface-strong)]"
+                          onClick={() => handleInviteFriend(room.room_id)}
+                        >
+                          <UserPlus className="h-4 w-4" />
+                          Invite friend
+                        </button>
+                      </>
+                    ) : (
+                      <button
+                        type="button"
+                        className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm transition-colors hover:bg-[var(--pc-surface-strong)]"
+                        onClick={() => handleInviteFriend(room.room_id)}
+                      >
+                        <UserPlus className="h-4 w-4" />
+                        Invite friend
+                      </button>
+                    )}
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+      </section>
+
+      {inviteModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+          <button
+            type="button"
+            className="absolute inset-0 bg-black/70"
+            onClick={() => setInviteModalOpen(false)}
+            aria-label="Close invite modal"
+          />
+          <div className={`relative z-10 w-full max-w-md p-5 ${panelClass}`}>
+            <div className="mb-4">
+              <div className="font-mono text-[11px] font-bold uppercase tracking-[0.16em] text-[var(--pc-text-muted)]">
+                Room Invite
+              </div>
+              <h3 className="mt-2 text-xl font-semibold">Invite a Friend</h3>
+            </div>
+
+            {friends.length === 0 ? (
+              <div className="border-2 border-[var(--pc-border)] bg-[var(--pc-bg)] px-4 py-5 text-sm text-[var(--pc-text-muted)]">
+                No friends available for invite.
+              </div>
+            ) : (
+              <div className="space-y-2">
+                {friends.map((friend) => (
+                  <div
+                    key={friend.user_id}
+                    className="flex items-center justify-between gap-3 border-2 border-[var(--pc-border)] bg-[var(--pc-bg)] px-4 py-3"
+                  >
+                    <span className="truncate text-sm">{friend.username}</span>
+                    <button
+                      type="button"
+                      onClick={() => void handleConfirmInvite(friend.username)}
+                      className={`${actionButtonClass} bg-[var(--pc-action-inverse-bg)] text-[var(--pc-action-inverse-text)] hover:bg-[var(--pc-action-inverse-hover)]`}
+                    >
+                      Invite
+                    </button>
+                  </div>
                 ))}
-              </ul>
+              </div>
             )}
+
             <div className="mt-4 flex justify-end">
-              <Button variant="ghost" size="sm" onClick={() => setInviteModalOpen(false)}>
-                Отмена
-              </Button>
+              <button
+                type="button"
+                onClick={() => setInviteModalOpen(false)}
+                className={`${actionButtonClass} bg-[var(--pc-bg)] text-[var(--pc-text)] hover:bg-[var(--pc-surface-strong)]`}
+              >
+                Cancel
+              </button>
             </div>
           </div>
         </div>

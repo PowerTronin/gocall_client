@@ -1,18 +1,22 @@
-import React, { useState, useEffect, useRef } from "react";
-import Button from "../components/Button";
-import { Plus, Video, MoreVertical } from "lucide-react";
-import { useAuth } from "../context/AuthContext";
-import {
-  fetchMyRooms,
-  fetchInvitedRooms,
-  deleteRoom,
-  updateRoom,
-  inviteFriendToRoom,
-  getOrCreateDirectRoom,
-} from "../services/rooms-api";
-import { fetchFriends } from "../services/friends-api";
-import { Room, Friend } from "../types";
+import React, { useEffect, useRef, useState } from "react";
+import { MoreVertical, Plus, Video } from "lucide-react";
 import { useNavigate } from "react-router-dom";
+
+import { useAuth } from "../context/AuthContext";
+import { fetchFriends } from "../services/friends-api";
+import {
+  deleteRoom,
+  fetchInvitedRooms,
+  fetchMyRooms,
+  getOrCreateDirectRoom,
+  inviteFriendToRoom,
+  updateRoom,
+} from "../services/rooms-api";
+import { Friend, Room } from "../types";
+
+const panelClass = "border-2 border-[var(--pc-border)] bg-[var(--pc-panel)]";
+const actionButtonClass =
+  "inline-flex items-center justify-center border-2 border-[var(--pc-border)] px-3 py-2 font-mono text-[11px] font-bold uppercase tracking-[0.14em] transition-colors";
 
 const Index: React.FC = () => {
   const { token, user } = useAuth();
@@ -24,7 +28,6 @@ const Index: React.FC = () => {
   const [inviteModalOpen, setInviteModalOpen] = useState(false);
   const [inviteModalRoom, setInviteModalRoom] = useState<string | null>(null);
 
-  // Загружаем данные: собственные комнаты, приглашённые комнаты и друзей
   useEffect(() => {
     const loadData = async () => {
       if (!token) return;
@@ -33,7 +36,6 @@ const Index: React.FC = () => {
         const invited = await fetchInvitedRooms(token);
         const fetchedFriends = await fetchFriends(token);
 
-        // Помечаем, какие комнаты созданы пользователем
         const markedOwnRooms = ownRooms.map((room) => ({
           ...room,
           is_owner: room.user_id === user?.user_id,
@@ -47,14 +49,13 @@ const Index: React.FC = () => {
         console.error("Error fetching data:", error);
       }
     };
-    loadData();
+    void loadData();
   }, [token, user?.user_id]);
 
   const allRooms: Room[] = [...rooms, ...invitedRooms];
   const getRoomDisplayName = (room: Room) =>
     room.name.startsWith("__direct__:") ? "Private voice room" : room.name;
 
-  // Удаление комнаты
   const handleDeleteRoom = async (roomId: string) => {
     if (!token) return;
     try {
@@ -67,18 +68,17 @@ const Index: React.FC = () => {
     }
   };
 
-  // Редактирование комнаты (только название)
   const handleEditRoom = async (roomId: string) => {
     if (!token) return;
-    const newName = window.prompt("Введите новое название комнаты:");
-    if (!newName) return;
+    const nextName = window.prompt("Enter a new room name:");
+    if (!nextName) return;
     try {
-      await updateRoom(roomId, newName, token);
+      await updateRoom(roomId, nextName, token);
       setRooms((prev) =>
-        prev.map((room) => (room.room_id === roomId ? { ...room, name: newName } : room))
+        prev.map((room) => (room.room_id === roomId ? { ...room, name: nextName } : room))
       );
       setInvitedRooms((prev) =>
-        prev.map((room) => (room.room_id === roomId ? { ...room, name: newName } : room))
+        prev.map((room) => (room.room_id === roomId ? { ...room, name: nextName } : room))
       );
       setActiveRoomMenu(null);
     } catch (error: any) {
@@ -86,38 +86,32 @@ const Index: React.FC = () => {
     }
   };
 
-  // Открытие модального окна для приглашения друга в комнату
   const handleInviteFriend = (roomId: string) => {
     setInviteModalRoom(roomId);
     setInviteModalOpen(true);
     setActiveRoomMenu(null);
   };
 
-  // Подтверждение приглашения (в модальном окне)
   const handleConfirmInvite = async (friendName: string) => {
     if (!token || !inviteModalRoom) return;
     try {
       await inviteFriendToRoom(inviteModalRoom, friendName, token);
-      alert(`Друг ${friendName} приглашён в комнату!`);
       setInviteModalOpen(false);
     } catch (error: any) {
       console.error("Failed to invite friend:", error.message);
     }
   };
 
-  // Обработка присоединения к комнате - navigate using room name
   const handleJoinRoom = (room: Room) => {
     navigate(`/room/${encodeURIComponent(room.room_id)}`, {
-      state: { roomName: room.name }
+      state: { roomName: room.name },
     });
   };
 
-  // Переключение контекстного меню для комнаты
   const toggleContextMenu = (roomId: string) => {
     setActiveRoomMenu((prev) => (prev === roomId ? null : roomId));
   };
 
-  // Закрытие контекстного меню при клике вне его области
   const menuRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
@@ -130,86 +124,147 @@ const Index: React.FC = () => {
   }, []);
 
   return (
-    <div className="min-h-screen flex">
-      {/* Основной контент */}
-      <main className="flex-1 overflow-auto p-6">
-        <div className="flex items-center justify-between mb-8">
-          <h1 className="text-2xl font-bold">Welcome to VideoChat</h1>
-          <Button variant="primary" onClick={() => navigate("/rooms")}>
-            <Plus className="h-4 w-4 mr-2" />
-            Create Room
-          </Button>
-        </div>
-
-        {/* Секция комнат */}
-        <section className="mb-12">
-          <h2 className="text-xl font-semibold mb-4">Комнаты</h2>
-          {allRooms.length === 0 ? (
-            <p className="text-gray-500">
-              Нет комнат. Создайте новую комнату или ждите приглашения.
+    <div className="space-y-6 text-[var(--pc-text)]">
+      <section className={`${panelClass} p-5`}>
+        <div className="flex flex-col gap-4 xl:flex-row xl:items-end xl:justify-between">
+          <div>
+            <div className="font-mono text-[11px] font-bold uppercase tracking-[0.18em] text-[var(--pc-text-muted)]">
+              Power-Call // Home
+            </div>
+            <h1 className="mt-2 text-3xl font-semibold">
+              Welcome back, {user?.username || "Operator"}
+            </h1>
+            <p className="mt-1 text-sm text-[var(--pc-text-muted)]">
+              Monitor rooms, jump into private voice, and keep your network moving.
             </p>
+          </div>
+
+          <div className="flex flex-wrap gap-3">
+            <button
+              type="button"
+              onClick={() => navigate("/rooms")}
+              className={`${actionButtonClass} gap-2 bg-[var(--pc-action-inverse-bg)] text-[var(--pc-action-inverse-text)] hover:bg-[var(--pc-action-inverse-hover)]`}
+            >
+              <Plus className="h-4 w-4" />
+              Create Room
+            </button>
+            <button
+              type="button"
+              onClick={() => navigate("/friends")}
+              className={`${actionButtonClass} bg-[var(--pc-bg)] text-[var(--pc-text)] hover:bg-[var(--pc-surface-strong)]`}
+            >
+              Open Contacts
+            </button>
+          </div>
+        </div>
+      </section>
+
+      <div className="grid gap-6 xl:grid-cols-[1.45fr_1fr]">
+        <section className={`${panelClass} p-5`}>
+          <div className="mb-4 flex items-center justify-between">
+            <div>
+              <div className="font-mono text-[11px] font-bold uppercase tracking-[0.16em] text-[var(--pc-text-muted)]">
+                Mission Feed
+              </div>
+              <h2 className="mt-2 text-xl font-semibold">Active Rooms</h2>
+            </div>
+            <div className="font-mono text-xs uppercase tracking-[0.14em] text-[var(--pc-text-soft)]">
+              {allRooms.length} total
+            </div>
+          </div>
+
+          {allRooms.length === 0 ? (
+            <div className="border-2 border-[var(--pc-border)] bg-[var(--pc-bg)] p-8 text-center">
+              <div className="font-mono text-sm font-bold uppercase tracking-[0.18em]">
+                No rooms yet
+              </div>
+              <p className="mt-2 text-sm text-[var(--pc-text-muted)]">
+                Open the directory and create the first room.
+              </p>
+            </div>
           ) : (
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-              {allRooms.map((room) => (
+            <div className="grid gap-4 lg:grid-cols-2">
+              {allRooms.slice(0, 4).map((room) => (
                 <div
                   key={room.room_id}
-                  className={`relative p-4 rounded-lg shadow ${
-                    room.is_owner
-                      ? "border-2 border-blue-500"
-                      : "border-2 border-green-500"
+                  className={`relative flex min-h-[190px] flex-col justify-between border-2 p-4 ${
+                    room.is_owner ? "border-[var(--pc-border)] bg-[var(--pc-surface-strong)]" : "border-[var(--pc-border)] bg-[var(--pc-surface)]"
                   }`}
                 >
-                  <div className="mb-2">
-                    <h3 className="font-medium">{getRoomDisplayName(room)}</h3>
+                  <div>
+                    <div className="mb-3 flex items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <div className="font-mono text-[11px] font-bold uppercase tracking-[0.16em] text-[var(--pc-text-soft)]">
+                          {room.is_owner ? "Owned room" : "Invited room"}
+                        </div>
+                        <h3 className="mt-2 break-words text-lg font-semibold">
+                          {getRoomDisplayName(room)}
+                        </h3>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => toggleContextMenu(room.room_id)}
+                        className="flex h-9 w-9 shrink-0 items-center justify-center border-2 border-[var(--pc-border)] bg-[var(--pc-bg)] transition-colors hover:bg-[var(--pc-action-hover)]"
+                        title="Room actions"
+                      >
+                        <MoreVertical className="h-4 w-4" />
+                      </button>
+                    </div>
+                    <div className="font-mono text-[11px] uppercase tracking-[0.14em] text-[var(--pc-text-subtle)]">
+                      Quick launch available
+                    </div>
                   </div>
-                  <div className="flex justify-between items-center">
-                    <Button
-                      variant="secondary"
-                      size="sm"
+
+                  <div className="mt-5 flex items-center justify-between gap-3">
+                    <button
+                      type="button"
                       onClick={() => handleJoinRoom(room)}
+                      className={`${actionButtonClass} bg-[var(--pc-action-inverse-bg)] text-[var(--pc-action-inverse-text)] hover:bg-[var(--pc-action-inverse-hover)]`}
                     >
-                      Присоединиться
-                    </Button>
-                    <button onClick={() => toggleContextMenu(room.room_id)}>
-                      <MoreVertical className="h-5 w-5" />
+                      Join Room
                     </button>
+                    <div className="font-mono text-[11px] uppercase tracking-[0.14em] text-[var(--pc-text-subtle)]">
+                      {room.type || "voice"}
+                    </div>
                   </div>
-                  {/* Контекстное меню */}
+
                   {activeRoomMenu === room.room_id && (
                     <div
                       ref={menuRef}
-                      className="absolute right-2 top-10 bg-white bg-opacity-80 backdrop-blur-sm rounded-lg shadow-md z-10 p-2"
+                      className="absolute right-4 top-14 z-20 w-56 border-2 border-[var(--pc-border)] bg-[var(--pc-bg)] p-2 shadow-[0_12px_30px_rgba(0,0,0,0.4)]"
                     >
                       {room.is_owner ? (
                         <>
                           <button
-                            className="flex items-center gap-2 px-2 py-1 hover:bg-gray-200 rounded"
-                            onClick={() => handleDeleteRoom(room.room_id)}
+                            type="button"
+                            className="flex w-full items-center px-3 py-2 text-left text-sm transition-colors hover:bg-[var(--pc-surface-strong)]"
+                            onClick={() => void handleDeleteRoom(room.room_id)}
                           >
-                            <span>Удалить комнату</span>
+                            Delete room
                           </button>
                           <button
-                            className="flex items-center gap-2 px-2 py-1 hover:bg-gray-200 rounded"
-                            onClick={() => handleEditRoom(room.room_id)}
+                            type="button"
+                            className="flex w-full items-center px-3 py-2 text-left text-sm transition-colors hover:bg-[var(--pc-surface-strong)]"
+                            onClick={() => void handleEditRoom(room.room_id)}
                           >
-                            <span>Редактировать название</span>
+                            Rename room
                           </button>
                           <button
-                            className="flex items-center gap-2 px-2 py-1 hover:bg-gray-200 rounded"
+                            type="button"
+                            className="flex w-full items-center px-3 py-2 text-left text-sm transition-colors hover:bg-[var(--pc-surface-strong)]"
                             onClick={() => handleInviteFriend(room.room_id)}
                           >
-                            <span>Пригласить друга</span>
+                            Invite friend
                           </button>
                         </>
                       ) : (
-                        <>
-                          <button
-                            className="flex items-center gap-2 px-2 py-1 hover:bg-gray-200 rounded"
-                            onClick={() => handleInviteFriend(room.room_id)}
-                          >
-                            <span>Пригласить друга</span>
-                          </button>
-                        </>
+                        <button
+                          type="button"
+                          className="flex w-full items-center px-3 py-2 text-left text-sm transition-colors hover:bg-[var(--pc-surface-strong)]"
+                          onClick={() => handleInviteFriend(room.room_id)}
+                        >
+                          Invite friend
+                        </button>
                       )}
                     </div>
                   )}
@@ -219,84 +274,120 @@ const Index: React.FC = () => {
           )}
         </section>
 
-        {/* Секция друзей */}
-        <section>
-          <h2 className="text-xl font-semibold mb-4">Друзья</h2>
-          {friends && friends.length === 0 ? (
-            <p className="text-gray-500">Нет друзей. Добавьте новых друзей!</p>
+        <section className={`${panelClass} p-5`}>
+          <div className="mb-4 flex items-center justify-between">
+            <div>
+              <div className="font-mono text-[11px] font-bold uppercase tracking-[0.16em] text-[var(--pc-text-muted)]">
+                Direct Links
+              </div>
+              <h2 className="mt-2 text-xl font-semibold">Friends</h2>
+            </div>
+            <button
+              type="button"
+              onClick={() => navigate("/friends")}
+              className={`${actionButtonClass} bg-[var(--pc-bg)] text-[var(--pc-text)] hover:bg-[var(--pc-surface-strong)]`}
+            >
+              Open All
+            </button>
+          </div>
+
+          {friends.length === 0 ? (
+            <div className="border-2 border-[var(--pc-border)] bg-[var(--pc-bg)] p-8 text-center text-[var(--pc-text-muted)]">
+              No friends yet. Add contacts from the Friends page.
+            </div>
           ) : (
-            <div className="grid gap-2">
-              {friends.map((friend) => {
-                return (
-                  <div
-                    key={friend.id}
-                    className="flex items-center justify-between p-3 rounded-lg hover:bg-gray-100 transition-colors"
-                  >
+            <div className="space-y-3">
+              {friends.slice(0, 6).map((friend) => (
+                <div
+                  key={friend.id}
+                  className="flex items-center justify-between gap-3 border-2 border-[var(--pc-border)] bg-[var(--pc-bg)] px-4 py-3"
+                >
+                  <div className="min-w-0">
                     <div className="flex items-center gap-3">
-                      <div className={`w-2 h-2 rounded-full ${friend.is_online ? 'bg-green-500' : 'bg-gray-400'}`} />
-                      <span>{friend.username}</span>
+                      <div
+                        className={`h-2.5 w-2.5 rounded-full ${
+                          friend.is_online ? "bg-[var(--pc-online)]" : "bg-[var(--pc-offline)]"
+                        }`}
+                      />
+                      <div className="truncate text-sm font-medium">{friend.username}</div>
                     </div>
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      onClick={async () => {
-                        if (!token) return;
-                        try {
-                          const room = await getOrCreateDirectRoom(friend.friend_user_id, token);
-                          navigate(`/room/${encodeURIComponent(room.room_id)}`, {
-                            state: { roomName: `Private voice with ${friend.username}` },
-                          });
-                        } catch (error) {
-                          console.error("Failed to open private room:", error);
-                        }
-                      }}
-                    >
-                      <Video className="h-4 w-4 mr-2" />
-                      Voice Room
-                    </Button>
+                    <div className="mt-1 font-mono text-[11px] uppercase tracking-[0.14em] text-[var(--pc-text-subtle)]">
+                      {friend.is_online ? "online" : "offline"}
+                    </div>
                   </div>
-                );
-              })}
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      if (!token) return;
+                      try {
+                        const room = await getOrCreateDirectRoom(friend.friend_user_id, token);
+                        navigate(`/room/${encodeURIComponent(room.room_id)}`, {
+                          state: { roomName: `Private voice with ${friend.username}` },
+                        });
+                      } catch (error) {
+                        console.error("Failed to open private room:", error);
+                      }
+                    }}
+                    className={`${actionButtonClass} gap-2 bg-[var(--pc-action-inverse-bg)] text-[var(--pc-action-inverse-text)] hover:bg-[var(--pc-action-inverse-hover)]`}
+                  >
+                    <Video className="h-4 w-4" />
+                    Voice
+                  </button>
+                </div>
+              ))}
             </div>
           )}
         </section>
-      </main>
+      </div>
 
-      {/* Модальное окно для приглашения друга */}
       {inviteModalOpen && (
-        <div className="fixed inset-0 flex items-center justify-center z-50">
-          {/* Полупрозрачный бекграунд */}
-          <div
-            className="absolute inset-0 bg-black opacity-50"
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+          <button
+            type="button"
+            className="absolute inset-0 bg-black/70"
             onClick={() => setInviteModalOpen(false)}
-          ></div>
-          <div className="bg-white p-4 rounded-lg z-10 w-80">
-            <h3 className="text-lg font-bold mb-4">Пригласить друга</h3>
+            aria-label="Close invite modal"
+          />
+          <div className={`relative z-10 w-full max-w-md p-5 ${panelClass}`}>
+            <div className="mb-4">
+              <div className="font-mono text-[11px] font-bold uppercase tracking-[0.16em] text-[var(--pc-text-muted)]">
+                Quick Invite
+              </div>
+              <h3 className="mt-2 text-xl font-semibold">Invite a Friend</h3>
+            </div>
+
             {friends.length === 0 ? (
-              <p>Нет друзей для приглашения</p>
+              <div className="border-2 border-[var(--pc-border)] bg-[var(--pc-bg)] px-4 py-5 text-sm text-[var(--pc-text-muted)]">
+                No friends available for invite.
+              </div>
             ) : (
-              <ul>
+              <div className="space-y-2">
                 {friends.map((friend) => (
-                  <li
+                  <div
                     key={friend.id}
-                    className="flex justify-between items-center p-2 hover:bg-gray-100 rounded"
+                    className="flex items-center justify-between gap-3 border-2 border-[var(--pc-border)] bg-[var(--pc-bg)] px-4 py-3"
                   >
-                    <span>{friend.username}</span>
-                    <Button
-                      variant="primary"
-                      size="sm"
-                      onClick={() => handleConfirmInvite(friend.username)}
+                    <span className="truncate text-sm">{friend.username}</span>
+                    <button
+                      type="button"
+                      onClick={() => void handleConfirmInvite(friend.username)}
+                      className={`${actionButtonClass} bg-[var(--pc-action-inverse-bg)] text-[var(--pc-action-inverse-text)] hover:bg-[var(--pc-action-inverse-hover)]`}
                     >
-                      Пригласить
-                    </Button>
-                  </li>
+                      Invite
+                    </button>
+                  </div>
                 ))}
-              </ul>
+              </div>
             )}
+
             <div className="mt-4 flex justify-end">
-              <Button variant="ghost" size="sm" onClick={() => setInviteModalOpen(false)}>
-                Отмена
-              </Button>
+              <button
+                type="button"
+                onClick={() => setInviteModalOpen(false)}
+                className={`${actionButtonClass} bg-[var(--pc-bg)] text-[var(--pc-text)] hover:bg-[var(--pc-surface-strong)]`}
+              >
+                Cancel
+              </button>
             </div>
           </div>
         </div>

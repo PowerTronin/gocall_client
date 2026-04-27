@@ -1,4 +1,4 @@
-# GoCall Client
+# Power-Call Client
 
 React + Vite client for WireChat.
 
@@ -44,5 +44,5 @@ Open `http://localhost:4173`.
 ## Production Notes
 
 - Serve `dist/` behind Nginx/Caddy.
-- Proxy `/api` and `/ws` to `wirechat-server` (`127.0.0.1:8080`).
+- Proxy `/api` and `/ws` to the Power-Call backend (`127.0.0.1:8080`).
 - For browser calls use HTTPS + WSS for both app and LiveKit.

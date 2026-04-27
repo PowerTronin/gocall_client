@@ -2,7 +2,6 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
 import { ArrowLeft, Loader2, Send, Video } from "lucide-react";
 
-import Button from "../components/Button";
 import { useAuth } from "../context/AuthContext";
 import { getUserInfo } from "../services/api";
 import {
@@ -18,6 +17,10 @@ interface ChatMessageView {
   text: string;
   created_at: string;
 }
+
+const panelClass = "border-2 border-[var(--pc-border)] bg-[var(--pc-panel)]";
+const actionButtonClass =
+  "inline-flex items-center justify-center border-2 border-[var(--pc-border)] px-3 py-2 font-mono text-[11px] font-bold uppercase tracking-[0.14em] transition-colors";
 
 const ChatPage: React.FC = () => {
   const { friendId } = useParams();
@@ -178,110 +181,148 @@ const ChatPage: React.FC = () => {
 
   if (isLoading) {
     return (
-      <div className="flex flex-col h-screen items-center justify-center bg-gray-50">
-        <Loader2 className="w-8 h-8 animate-spin text-primary mb-4" />
-        <p className="text-gray-600">Loading chat...</p>
+      <div className="flex h-screen items-center justify-center bg-[var(--pc-bg)] text-[var(--pc-text)]">
+        <div className="text-center">
+          <Loader2 className="mx-auto mb-4 h-8 w-8 animate-spin" />
+          <p className="font-mono text-sm uppercase tracking-[0.2em]">Loading chat...</p>
+        </div>
       </div>
     );
   }
 
   if (error && sortedMessages.length === 0) {
     return (
-      <div className="flex flex-col h-screen items-center justify-center bg-gray-50 p-4">
-        <div className="text-center max-w-md">
-          <h2 className="text-xl font-semibold text-red-600 mb-2">Error</h2>
-          <p className="text-gray-600 mb-4">{error}</p>
-          <Button variant="primary" onClick={() => navigate(-1)}>
+      <div className="flex h-screen items-center justify-center bg-[var(--pc-bg)] px-4 text-[var(--pc-text)]">
+        <div className={`w-full max-w-xl p-6 ${panelClass}`}>
+          <div className="mb-3 font-mono text-[11px] font-bold uppercase tracking-[0.18em] text-[var(--pc-text-muted)]">
+            Power-Call // Error
+          </div>
+          <h2 className="mb-3 text-xl font-semibold">Chat Error</h2>
+          <p className="mb-6 text-sm text-[var(--pc-text-muted)]">{error}</p>
+          <button
+            type="button"
+            onClick={() => navigate(-1)}
+            className={`${actionButtonClass} bg-[var(--pc-action-inverse-bg)] text-[var(--pc-action-inverse-text)] hover:bg-[var(--pc-action-inverse-hover)]`}
+          >
             Go Back
-          </Button>
+          </button>
         </div>
       </div>
     );
   }
 
   return (
-    <div className="flex flex-col h-screen bg-gray-50">
-      <header className="flex items-center justify-between px-4 py-3 bg-white border-b shadow-sm">
-        <div className="flex items-center gap-3">
+    <div className="flex h-[calc(100vh-2rem)] flex-col gap-4 text-[var(--pc-text)] lg:h-[calc(100vh-3rem)]">
+      <header className={`flex items-center justify-between px-4 py-3 ${panelClass}`}>
+        <div className="flex min-w-0 items-center gap-3">
           <button
+            type="button"
             onClick={() => navigate(-1)}
-            className="p-2 rounded-lg hover:bg-gray-100 transition-colors"
+            className="flex h-10 w-10 items-center justify-center border-2 border-[var(--pc-border)] bg-[var(--pc-bg)] transition-colors hover:bg-[var(--pc-surface-strong)]"
           >
-            <ArrowLeft className="w-5 h-5 text-gray-600" />
+            <ArrowLeft className="h-4 w-4" />
           </button>
-          <div>
-            <h1 className="font-semibold text-gray-900">{friendUsername || "Direct chat"}</h1>
-            <p className="text-xs text-gray-500">
-              {isSocketOpen ? "Connected" : "Connecting..."}
+          <div className="min-w-0">
+            <div className="font-mono text-[11px] font-bold uppercase tracking-[0.18em] text-[var(--pc-text-muted)]">
+              Power-Call // Direct Link
+            </div>
+            <h1 className="truncate text-xl font-semibold">
+              {friendUsername || "Direct chat"}
+            </h1>
+            <p className="font-mono text-[11px] uppercase tracking-[0.14em] text-[var(--pc-text-subtle)]">
+              {isSocketOpen ? "connected" : "connecting"}
             </p>
           </div>
         </div>
         <button
+          type="button"
           onClick={() => void handleOpenVoiceRoom()}
-          className="p-2 rounded-lg hover:bg-gray-100 transition-colors"
+          className={`${actionButtonClass} gap-2 bg-[var(--pc-action-inverse-bg)] text-[var(--pc-action-inverse-text)] hover:bg-[var(--pc-action-inverse-hover)]`}
           title="Open private voice room"
         >
-          <Video className="w-5 h-5 text-primary" />
+          <Video className="h-4 w-4" />
+          Voice
         </button>
       </header>
 
-      <main className="flex-1 overflow-y-auto p-4 space-y-4">
-        {sortedMessages.length === 0 ? (
-          <div className="flex flex-col items-center justify-center h-full text-gray-500">
-            <p>No messages yet</p>
-            <p className="text-sm">Start the conversation.</p>
+      <main className={`flex min-h-0 flex-1 flex-col ${panelClass}`}>
+        <div className="border-b-2 border-[var(--pc-border)] px-4 py-3">
+          <div className="font-mono text-[11px] font-bold uppercase tracking-[0.16em] text-[var(--pc-text-muted)]">
+            Message Stream
           </div>
-        ) : (
-          sortedMessages.map((msg) => {
-            const isMe = msg.sender_id === user?.user_id;
-            return (
-              <div
-                key={msg.id}
-                className={`flex ${isMe ? "justify-end" : "justify-start"}`}
-              >
-                <div
-                  className={`max-w-[75%] rounded-2xl px-4 py-2 ${
-                    isMe
-                      ? "bg-primary text-white rounded-br-md"
-                      : "bg-white shadow-sm border rounded-bl-md"
-                  }`}
-                >
-                  <p className="break-words">{msg.text}</p>
-                  <p
-                    className={`text-xs mt-1 ${
-                      isMe ? "text-white/70" : "text-gray-400"
-                    }`}
-                  >
-                    {formatTime(msg.created_at)}
-                  </p>
-                </div>
-              </div>
-            );
-          })
-        )}
-        <div ref={messagesEndRef} />
-      </main>
-
-      <div className="p-4 bg-white border-t">
-        {error && <p className="mb-2 text-sm text-red-500">{error}</p>}
-        <div className="flex items-center gap-2">
-          <input
-            type="text"
-            value={inputMessage}
-            onChange={(event) => setInputMessage(event.target.value)}
-            onKeyDown={handleKeyDown}
-            placeholder="Type a message..."
-            className="flex-1 px-4 py-2 rounded-full border border-gray-300 focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary"
-          />
-          <button
-            onClick={handleSend}
-            disabled={!inputMessage.trim() || !isSocketOpen}
-            className="p-3 bg-primary text-white rounded-full hover:bg-primary-hover transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-          >
-            <Send className="w-5 h-5" />
-          </button>
+          <div className="mt-1 text-sm text-[var(--pc-text-soft)]">
+            Secure direct conversation channel
+          </div>
         </div>
-      </div>
+
+        <div className="min-h-0 flex-1 overflow-y-auto bg-[var(--pc-bg)] p-4">
+          {sortedMessages.length === 0 ? (
+            <div className="flex h-full flex-col items-center justify-center text-center">
+              <div className="mb-3 font-mono text-sm font-bold uppercase tracking-[0.18em]">
+                No messages yet
+              </div>
+              <p className="text-sm text-[var(--pc-text-muted)]">Open the conversation with your first message.</p>
+            </div>
+          ) : (
+            <div className="space-y-3">
+              {sortedMessages.map((message) => {
+                const isMe = message.sender_id === user?.user_id;
+                return (
+                  <div
+                    key={message.id}
+                    className={`flex ${isMe ? "justify-end" : "justify-start"}`}
+                  >
+                    <div
+                      className={`max-w-[85%] border-2 px-4 py-3 sm:max-w-[75%] ${
+                        isMe
+                          ? "border-[var(--pc-border)] bg-[var(--pc-action-inverse-bg)] text-[var(--pc-action-inverse-text)]"
+                          : "border-[var(--pc-border)] bg-[var(--pc-panel)] text-[var(--pc-text)]"
+                      }`}
+                    >
+                      <p className="break-words text-sm leading-6">{message.text}</p>
+                      <p
+                        className={`mt-2 font-mono text-[10px] uppercase tracking-[0.14em] ${
+                          isMe ? "text-[var(--pc-action-inverse-muted)]" : "text-[var(--pc-text-subtle)]"
+                        }`}
+                      >
+                        {formatTime(message.created_at)}
+                      </p>
+                    </div>
+                  </div>
+                );
+              })}
+              <div ref={messagesEndRef} />
+            </div>
+          )}
+        </div>
+
+        <div className="border-t-2 border-[var(--pc-border)] bg-[var(--pc-panel)] p-4">
+          {error && (
+            <div className="mb-3 font-mono text-[11px] uppercase tracking-[0.14em] text-[var(--pc-text)]">
+              {error}
+            </div>
+          )}
+          <div className="flex items-center gap-3">
+            <input
+              type="text"
+              value={inputMessage}
+              onChange={(event) => setInputMessage(event.target.value)}
+              onKeyDown={handleKeyDown}
+              placeholder="Type a message"
+              className="min-w-0 flex-1 border-2 border-[var(--pc-border)] bg-[var(--pc-bg)] px-4 py-3 text-sm text-[var(--pc-text)] outline-none placeholder:text-[var(--pc-text-subtle)]"
+            />
+            <button
+              type="button"
+              onClick={handleSend}
+              disabled={!inputMessage.trim() || !isSocketOpen}
+              className="flex h-12 w-12 items-center justify-center border-2 border-[var(--pc-border)] bg-[var(--pc-action-inverse-bg)] text-[var(--pc-action-inverse-text)] transition-colors hover:bg-[var(--pc-action-inverse-hover)] disabled:cursor-not-allowed disabled:opacity-40"
+              title="Send message"
+            >
+              <Send className="h-4 w-4" />
+            </button>
+          </div>
+        </div>
+      </main>
     </div>
   );
 };

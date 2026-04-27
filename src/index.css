@@ -24,6 +24,63 @@
     --input: 240 5.9% 90%;
     --ring: 199 89% 57%;
     --radius: 0.75rem;
+
+    --pc-bg: #050505;
+    --pc-panel: #121212;
+    --pc-surface: #0a0a0a;
+    --pc-surface-strong: #111111;
+    --pc-surface-2: #141414;
+    --pc-text: #ffffff;
+    --pc-text-muted: rgba(255, 255, 255, 0.75);
+    --pc-text-soft: rgba(255, 255, 255, 0.65);
+    --pc-text-subtle: rgba(255, 255, 255, 0.5);
+    --pc-border: #ffffff;
+    --pc-action-bg: #050505;
+    --pc-action-hover: #111111;
+    --pc-action-text: #ffffff;
+    --pc-action-inverse-bg: #ffffff;
+    --pc-action-inverse-hover: #e5e7eb;
+    --pc-action-inverse-text: #050505;
+    --pc-action-inverse-muted: rgba(5, 5, 5, 0.6);
+    --pc-danger-bg: #1a0d0d;
+    --pc-online: #4ade80;
+    --pc-offline: rgba(255, 255, 255, 0.35);
+  }
+
+  :root[data-theme="light"] {
+    --pc-bg: #ffffff;
+    --pc-panel: #ffffff;
+    --pc-surface: #f7f9ff;
+    --pc-surface-strong: #e8efff;
+    --pc-surface-2: #eef3ff;
+    --pc-text: #0f172a;
+    --pc-text-muted: rgba(15, 23, 42, 0.72);
+    --pc-text-soft: rgba(15, 23, 42, 0.6);
+    --pc-text-subtle: rgba(15, 23, 42, 0.45);
+    --pc-border: #000dd4;
+    --pc-action-bg: #ffffff;
+    --pc-action-hover: #e8efff;
+    --pc-action-text: #0f172a;
+    --pc-action-inverse-bg: #000dd4;
+    --pc-action-inverse-hover: #0009b3;
+    --pc-action-inverse-text: #ffffff;
+    --pc-action-inverse-muted: rgba(255, 255, 255, 0.72);
+    --pc-danger-bg: #f5e7e5;
+    --pc-online: #18b67a;
+    --pc-offline: rgba(15, 23, 42, 0.28);
+  }
+
+  html,
+  body,
+  #root {
+    background: var(--pc-bg);
+    color: var(--pc-text);
+  }
+
+  body {
+    transition:
+      background-color 180ms ease,
+      color 180ms ease;
   }
 }
 
