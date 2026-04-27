@@ -125,6 +125,21 @@ const getCenteredStageViewOffset = (
     zoom
   );
 
+const getZoomAnchoredStageViewOffset = (
+  anchor: { x: number; y: number },
+  currentOffset: StageViewportOffset,
+  currentZoom: number,
+  nextZoom: number
+): StageViewportOffset => {
+  const worldX = (anchor.x - currentOffset.x) / currentZoom;
+  const worldY = (anchor.y - currentOffset.y) / currentZoom;
+
+  return {
+    x: anchor.x - worldX * nextZoom,
+    y: anchor.y - worldY * nextZoom,
+  };
+};
+
 const snapValue = (value: number, targets: number[], threshold = 10) => {
   for (const target of targets) {
     if (Math.abs(value - target) <= threshold) {
@@ -1546,20 +1561,34 @@ export default function RoomPage(): JSX.Element {
     setStageViewOffset(getCenteredStageViewOffset(stageSize, stageViewportSize, stageZoom));
   };
 
-  const handleAdjustStageZoom = (direction: "in" | "out") => {
-    setStageZoom((current) => {
-      const nextZoom = clamp(
-        Number((current + (direction === "in" ? 0.1 : -0.1)).toFixed(2)),
-        minStageZoom,
-        maxStageZoom
+  const handleSetStageZoom = useCallback(
+    (nextZoomValue: number, anchor?: { x: number; y: number }) => {
+      const nextZoom = clamp(Number(nextZoomValue.toFixed(2)), minStageZoom, maxStageZoom);
+      if (nextZoom === stageZoom) {
+        return;
+      }
+
+      const nextOffset = clampStageViewOffset(
+        anchor
+          ? getZoomAnchoredStageViewOffset(anchor, stageViewOffset, stageZoom, nextZoom)
+          : stageViewOffset,
+        stageSize,
+        stageViewportSize,
+        nextZoom
       );
 
-      setStageViewOffset((offset) =>
-        clampStageViewOffset(offset, stageSize, stageViewportSize, nextZoom)
-      );
+      setStageZoom(nextZoom);
+      setStageViewOffset(nextOffset);
+    },
+    [stageSize, stageViewportSize, stageViewOffset, stageZoom]
+  );
 
-      return nextZoom;
-    });
+  const handleAdjustStageZoom = (direction: "in" | "out", anchor?: { x: number; y: number }) => {
+    handleSetStageZoom(stageZoom + (direction === "in" ? 0.1 : -0.1), anchor);
+  };
+
+  const handleResetStageZoom = () => {
+    handleSetStageZoom(1);
   };
 
   const handleTogglePinnedTile = (tileId: string) => {
@@ -1954,6 +1983,13 @@ export default function RoomPage(): JSX.Element {
                 </div>
                 <button
                   type="button"
+                  onClick={handleResetStageZoom}
+                  className="flex h-10 items-center justify-center border-2 border-[var(--pc-border)] bg-[var(--pc-bg)] px-[14px] font-mono text-[11px] font-bold uppercase tracking-[0.14em] text-[var(--pc-text)] transition-colors hover:bg-[var(--pc-surface-strong)]"
+                >
+                  Reset Zoom
+                </button>
+                <button
+                  type="button"
                   onClick={handleResetStageLayout}
                   disabled={!canEditStageLayout}
                   className="flex h-10 items-center justify-center border-2 border-[var(--pc-border)] bg-[var(--pc-bg)] px-[14px] font-mono text-[11px] font-bold uppercase tracking-[0.14em] text-[var(--pc-text)] transition-colors hover:bg-[var(--pc-surface-strong)] disabled:cursor-not-allowed disabled:opacity-40"
@@ -2100,6 +2136,26 @@ export default function RoomPage(): JSX.Element {
           ) : layoutMode === "stage" ? (
             <div
               ref={stageCanvasRef}
+              onWheel={(event) => {
+                const target = event.target as HTMLElement | null;
+                if (target?.closest("[data-stage-tile='true']")) {
+                  return;
+                }
+
+                event.preventDefault();
+
+                const rect = stageCanvasRef.current?.getBoundingClientRect();
+                if (!rect) {
+                  return;
+                }
+
+                const anchor = {
+                  x: event.clientX - rect.left,
+                  y: event.clientY - rect.top,
+                };
+
+                handleAdjustStageZoom(event.deltaY < 0 ? "in" : "out", anchor);
+              }}
               onPointerDown={(event) => {
                 if (event.button !== 0) {
                   return;
