@@ -11,6 +11,9 @@ import {
   Pin,
   PhoneOff,
   Radio,
+  SquarePen,
+  StickyNote,
+  Trash2,
   Video,
   VideoOff,
 } from "lucide-react";
@@ -20,12 +23,15 @@ import { getStageLayoutPreference, type StageLayoutPreference } from "../app-pre
 import { useAuth } from "../context/AuthContext";
 import { useRoomVoice } from "../context/RoomVoiceContext";
 import {
+  createRoomStageNote,
+  deleteRoomStageNote,
   fetchRoomState,
   joinRoomAsMember,
   RoomStateResponse,
   RoomVoiceParticipantState,
   updateRoomSharedStageLayout,
   updateRoomSharedStageLayoutLock,
+  updateRoomStageNote,
 } from "../services/rooms-api";
 interface ControlButtonProps {
   icon: React.ReactNode;
@@ -52,6 +58,25 @@ interface VisualTile {
   track: Track;
   audioTrack?: Track;
 }
+
+interface StageNoteDraft {
+  id: number;
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  z: number;
+  title: string;
+  body: string;
+  body_bold: boolean;
+  body_strike: boolean;
+  body_size: "sm" | "md" | "lg" | "xl";
+  is_pinned: boolean;
+  user_id: string;
+  username: string;
+}
+
+type StageNoteSyncState = "idle" | "saving" | "saved" | "error";
 
 type RoomLayoutMode = "grid" | "stage";
 
@@ -92,6 +117,102 @@ const maxStageZoom = 1.6;
 const getStageStorageKey = (roomIdentifier: string) => `power-call:room-layout:${roomIdentifier}`;
 
 const clamp = (value: number, min: number, max: number) => Math.min(Math.max(value, min), max);
+
+const escapeHtml = (value: string) =>
+  value
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+
+const isProbablyHtml = (value: string) => /<\/?[a-z][\s\S]*>/i.test(value);
+
+const sanitizeNoteBodyHtml = (value: string): string => {
+  if (!value.trim()) {
+    return "";
+  }
+
+  if (typeof document === "undefined") {
+    return escapeHtml(value).replace(/\n/g, "<br>");
+  }
+
+  const source = document.createElement("div");
+  source.innerHTML = value;
+
+  const sanitizeNode = (node: Node): string => {
+    if (node.nodeType === Node.TEXT_NODE) {
+      return escapeHtml(node.textContent ?? "");
+    }
+
+    if (node.nodeType !== Node.ELEMENT_NODE) {
+      return "";
+    }
+
+    const element = node as HTMLElement;
+    const children = Array.from(element.childNodes).map(sanitizeNode).join("");
+    const tag = element.tagName.toLowerCase();
+
+    if (tag === "br") {
+      return "<br>";
+    }
+
+    if (tag === "b" || tag === "strong") {
+      return `<strong>${children}</strong>`;
+    }
+
+    if (tag === "s" || tag === "strike" || tag === "del") {
+      return `<s>${children}</s>`;
+    }
+
+    if (tag === "div" || tag === "p") {
+      return children ? `<div>${children}</div>` : "<div><br></div>";
+    }
+
+    return children;
+  };
+
+  const sanitized = Array.from(source.childNodes).map(sanitizeNode).join("");
+  const normalized = sanitized.replace(/^(<div><br><\/div>|<br>)+|(<div><br><\/div>|<br>)+$/g, "");
+
+  if (!normalized) {
+    return "";
+  }
+
+  const check = document.createElement("div");
+  check.innerHTML = normalized;
+  return (check.textContent ?? "").trim() ? normalized : "";
+};
+
+const getNoteBodyEditorHtml = (body: string, legacyBold: boolean, legacyStrike: boolean) => {
+  const baseHtml = isProbablyHtml(body) ? sanitizeNoteBodyHtml(body) : escapeHtml(body).replace(/\n/g, "<br>");
+  let nextHtml = baseHtml;
+
+  if (legacyBold && nextHtml) {
+    nextHtml = `<strong>${nextHtml}</strong>`;
+  }
+
+  if (legacyStrike && nextHtml) {
+    nextHtml = `<s>${nextHtml}</s>`;
+  }
+
+  return sanitizeNoteBodyHtml(nextHtml);
+};
+
+const getNoteBodySizeClass = (size: StageNoteDraft["body_size"]) => {
+  switch (size) {
+    case "sm":
+      return "text-xs";
+    case "md":
+      return "text-lg";
+    case "lg":
+      return "text-2xl";
+    case "xl":
+      return "text-4xl";
+    default:
+      return "text-lg";
+  }
+};
 
 const clampStageViewOffset = (
   offset: StageViewportOffset,
@@ -470,6 +591,9 @@ const TileActionButton: React.FC<TileActionButtonProps> = ({
   return (
     <button
       type="button"
+      onMouseDown={(event) => {
+        event.preventDefault();
+      }}
       onClick={(event) => {
         event.stopPropagation();
         onClick();
@@ -881,13 +1005,218 @@ const ScreenShareTile: React.FC<{
   );
 };
 
+const NoteTile: React.FC<{
+  note: StageNoteDraft;
+  editable?: boolean;
+  syncState?: StageNoteSyncState;
+  onTitleChange: (nextTitle: string) => void;
+  onBodyChange: (
+    nextBody: string,
+    options?: {
+      clearLegacyFormatting?: boolean;
+    }
+  ) => void;
+  onBodySizeCycle: () => void;
+  onPinToggle?: () => void;
+  onDelete?: () => void;
+}> = ({
+  note,
+  editable = true,
+  syncState = "idle",
+  onTitleChange,
+  onBodyChange,
+  onBodySizeCycle,
+  onPinToggle,
+  onDelete,
+}) => {
+  const bodyEditorRef = useRef<HTMLDivElement>(null);
+  const [formatState, setFormatState] = useState({
+    bold: note.body_bold,
+    strike: note.body_strike,
+  });
+  const syncLabel =
+    syncState === "saving"
+      ? "Saving"
+      : syncState === "saved"
+        ? "Saved"
+        : syncState === "error"
+          ? "Error"
+          : note.username || "Room note";
+  const editorHtml = getNoteBodyEditorHtml(note.body, note.body_bold, note.body_strike);
+
+  useEffect(() => {
+    const editor = bodyEditorRef.current;
+    if (!editor) {
+      return;
+    }
+
+    if (document.activeElement !== editor && editor.innerHTML !== editorHtml) {
+      editor.innerHTML = editorHtml;
+    }
+  }, [editorHtml]);
+
+  const updateFormatState = useCallback(() => {
+    if (typeof document === "undefined") {
+      return;
+    }
+
+    setFormatState({
+      bold: document.queryCommandState("bold"),
+      strike: document.queryCommandState("strikeThrough"),
+    });
+  }, []);
+
+  useEffect(() => {
+    const handleSelectionChange = () => {
+      const editor = bodyEditorRef.current;
+      if (!editor) {
+        return;
+      }
+
+      const selection = document.getSelection();
+      if (!selection?.anchorNode || !editor.contains(selection.anchorNode)) {
+        return;
+      }
+
+      updateFormatState();
+    };
+
+    document.addEventListener("selectionchange", handleSelectionChange);
+    return () => document.removeEventListener("selectionchange", handleSelectionChange);
+  }, [updateFormatState]);
+
+  const syncEditorBody = useCallback(() => {
+    const editor = bodyEditorRef.current;
+    if (!editor) {
+      return;
+    }
+
+    const nextBody = sanitizeNoteBodyHtml(editor.innerHTML);
+    onBodyChange(nextBody, { clearLegacyFormatting: true });
+    updateFormatState();
+  }, [onBodyChange, updateFormatState]);
+
+  const applyInlineFormat = useCallback(
+    (command: "bold" | "strikeThrough") => {
+      if (!editable || typeof document === "undefined") {
+        return;
+      }
+
+      const editor = bodyEditorRef.current;
+      if (!editor) {
+        return;
+      }
+
+      editor.focus();
+      document.execCommand(command, false);
+      syncEditorBody();
+    },
+    [editable, syncEditorBody]
+  );
+
+  return (
+    <div className="group relative flex h-full flex-col overflow-hidden border-[3px] border-[var(--pc-border)] bg-[var(--pc-panel)] p-[3px]">
+      <div className="flex items-center justify-between border-b-2 border-[var(--pc-border)] bg-[var(--pc-surface-2)] px-[10px] py-2">
+        <div className="min-w-0">
+          <div className="flex items-center gap-2">
+            <StickyNote className="h-3.5 w-3.5" />
+            <div className="font-mono text-[10px] font-bold uppercase tracking-[0.16em] text-[var(--pc-text)]">
+              Note
+            </div>
+          </div>
+          <div className="mt-1 truncate font-mono text-[9px] uppercase tracking-[0.12em] text-[var(--pc-text-muted)]">
+            {syncLabel}
+          </div>
+        </div>
+        <div className="flex items-center gap-1.5">
+          <TileActionButton
+            label="Bold"
+            onClick={() => applyInlineFormat("bold")}
+            icon={<span className="font-mono text-[10px] font-bold">B</span>}
+            isActive={formatState.bold}
+            disabled={!editable}
+          />
+          <TileActionButton
+            label="Strike"
+            onClick={() => applyInlineFormat("strikeThrough")}
+            icon={<span className="font-mono text-[10px] line-through">S</span>}
+            isActive={formatState.strike}
+            disabled={!editable}
+          />
+          {onPinToggle && (
+            <TileActionButton
+              label={note.is_pinned ? "Unpin note" : "Pin note"}
+              onClick={onPinToggle}
+              icon={<Pin className="h-3.5 w-3.5" />}
+              isActive={note.is_pinned}
+              disabled={!editable}
+            />
+          )}
+          {onDelete && (
+            <TileActionButton
+              label="Delete note"
+              onClick={onDelete}
+              icon={<Trash2 className="h-3.5 w-3.5" />}
+              disabled={!editable}
+            />
+          )}
+        </div>
+      </div>
+      <div className="flex min-h-0 flex-1 bg-[var(--pc-surface)]">
+        <div className="flex h-full min-h-0 w-full flex-col">
+          <input
+            value={note.title}
+            onChange={(event) => onTitleChange(event.target.value.slice(0, 80))}
+            disabled={!editable}
+            data-stage-ignore-drag="true"
+            className="border-b-2 border-[var(--pc-border)] bg-transparent px-3 py-2 font-mono text-[11px] font-bold uppercase tracking-[0.08em] text-[var(--pc-text)] outline-none placeholder:text-[var(--pc-text-subtle)] disabled:cursor-default"
+            placeholder="Title"
+          />
+          <div className="flex items-center gap-2 border-b-2 border-[var(--pc-border)] px-3 py-2">
+            <button
+              type="button"
+              data-stage-ignore-drag="true"
+              disabled={!editable}
+              onClick={(event) => {
+                event.stopPropagation();
+                onBodySizeCycle();
+              }}
+              className="border border-[var(--pc-border)] px-2 py-1 font-mono text-[10px] uppercase tracking-[0.12em] disabled:opacity-40"
+            >
+              {note.body_size}
+            </button>
+            <div className="font-mono text-[9px] uppercase tracking-[0.12em] text-[var(--pc-text-muted)]">
+              body style
+            </div>
+          </div>
+          <div
+            ref={bodyEditorRef}
+            contentEditable={editable}
+            suppressContentEditableWarning
+            data-stage-ignore-drag="true"
+            onInput={() => syncEditorBody()}
+            onBlur={() => syncEditorBody()}
+            onKeyUp={() => updateFormatState()}
+            onMouseUp={() => updateFormatState()}
+            className={`h-full min-h-0 w-full overflow-y-auto bg-transparent px-3 py-3 leading-[1.55] text-[var(--pc-text)] outline-none empty:before:pointer-events-none empty:before:text-[var(--pc-text-subtle)] empty:before:content-['Type_note...'] ${getNoteBodySizeClass(
+              note.body_size
+            )} ${editable ? "" : "cursor-default"}`}
+          />
+        </div>
+      </div>
+    </div>
+  );
+};
+
 const StageTileShell: React.FC<{
   layout: StageTileLayout;
   stageSize: { width: number; height: number };
   aspectRatio: number;
   minWidth: number;
+  minHeight?: number;
   zoom?: number;
   snapToGridEnabled?: boolean;
+  preserveAspectRatio?: boolean;
   editable?: boolean;
   isPinned?: boolean;
   isSelected?: boolean;
@@ -900,8 +1229,10 @@ const StageTileShell: React.FC<{
   stageSize,
   aspectRatio,
   minWidth,
+  minHeight = 120,
   zoom = 1,
   snapToGridEnabled = true,
+  preserveAspectRatio = true,
   editable = true,
   isPinned = false,
   isSelected = false,
@@ -943,18 +1274,21 @@ const StageTileShell: React.FC<{
             )
           : (() => {
               const deltaX = (event.clientX - dragState.startX) / zoom;
+              const deltaY = (event.clientY - dragState.startY) / zoom;
               const nextWidth = clamp(
                 dragState.startWidth + deltaX,
                 minWidth,
                 stageSize.width - layout.x
               );
-              const nextHeight = Math.round(nextWidth / aspectRatio);
+              const nextHeight = preserveAspectRatio
+                ? Math.round(nextWidth / aspectRatio)
+                : clamp(dragState.startHeight + deltaY, minHeight, stageSize.height - layout.y);
 
               return snapStageLayout(
                 {
                   ...layout,
                   w: nextWidth,
-                  h: clamp(nextHeight, 120, stageSize.height - layout.y),
+                  h: clamp(nextHeight, minHeight, stageSize.height - layout.y),
                 },
                 stageSize,
                 { enabled: snapToGridEnabled, snapWidth: true, snapHeight: true }
@@ -979,7 +1313,7 @@ const StageTileShell: React.FC<{
       window.removeEventListener("pointermove", handlePointerMove);
       window.removeEventListener("pointerup", handlePointerUp);
     };
-  }, [aspectRatio, layout, minWidth, onLayoutChange, snapToGridEnabled, stageSize, zoom]);
+  }, [aspectRatio, layout, minHeight, minWidth, onLayoutChange, preserveAspectRatio, snapToGridEnabled, stageSize, zoom]);
 
   return (
     <div
@@ -995,7 +1329,7 @@ const StageTileShell: React.FC<{
         }
 
         const target = event.target as HTMLElement | null;
-        if (target?.closest("button")) {
+        if (target?.closest("button,[data-stage-ignore-drag='true'],textarea,input,[contenteditable='true']")) {
           return;
         }
 
@@ -1109,6 +1443,8 @@ export default function RoomPage(): JSX.Element {
   const [personalPinnedTileIds, setPersonalPinnedTileIds] = useState<string[]>([]);
   const [sharedStageLayouts, setSharedStageLayouts] = useState<StageLayoutMap>({});
   const [sharedPinnedTileIds, setSharedPinnedTileIds] = useState<string[]>([]);
+  const [stageNotes, setStageNotes] = useState<StageNoteDraft[]>([]);
+  const [stageNoteSyncStates, setStageNoteSyncStates] = useState<Record<number, StageNoteSyncState>>({});
   const [showStageGrid, setShowStageGrid] = useState(true);
   const [stageSize, setStageSize] = useState(defaultStageSize);
   const [stageViewportSize, setStageViewportSize] = useState(defaultStageViewportSize);
@@ -1129,6 +1465,8 @@ export default function RoomPage(): JSX.Element {
   const sharedStageLayoutsRef = useRef<StageLayoutMap>({});
   const sharedPinnedTileIdsRef = useRef<string[]>([]);
   const lastSharedEditAtRef = useRef(0);
+  const noteSyncTimeoutsRef = useRef<Record<number, number>>({});
+  const lastStageNoteEditAtRef = useRef(0);
 
   const getRoomDisplayName = useCallback(
     (rawName: string, membersList: RoomStateResponse["members"]) => {
@@ -1265,6 +1603,48 @@ export default function RoomPage(): JSX.Element {
     setSharedStageLayouts(roomState.stage_layout.stage_layouts ?? {});
     setSharedPinnedTileIds(roomState.stage_layout.pinned_tile_ids ?? []);
   }, [roomState?.stage_layout]);
+
+  useEffect(() => {
+    if (!roomState?.stage_notes) {
+      return;
+    }
+
+    if (Date.now() - lastStageNoteEditAtRef.current < 1500) {
+      return;
+    }
+
+    setStageNotes(
+      roomState.stage_notes.map((note) => ({
+        id: note.id,
+        user_id: note.user_id,
+        username: note.username,
+        x: note.x,
+        y: note.y,
+        w: note.w,
+        h: note.h,
+        z: note.z,
+        title: note.title,
+        body: note.body,
+        body_bold: note.body_bold,
+        body_strike: note.body_strike,
+        body_size: note.body_size,
+        is_pinned: note.is_pinned,
+      }))
+    );
+    setStageNoteSyncStates((current) => {
+      const next: Record<number, StageNoteSyncState> = {};
+      roomState.stage_notes.forEach((note) => {
+        next[note.id] = current[note.id] === "error" ? "error" : "idle";
+      });
+      return next;
+    });
+  }, [roomState?.stage_notes]);
+
+  useEffect(() => {
+    return () => {
+      Object.values(noteSyncTimeoutsRef.current).forEach((timeoutId) => window.clearTimeout(timeoutId));
+    };
+  }, []);
 
   useEffect(() => {
     const updateStageSize = () => {
@@ -1544,6 +1924,69 @@ export default function RoomPage(): JSX.Element {
   const isCreator = members.some(
     (member) => member.user_id === user?.user_id && member.role === "creator"
   );
+  const orderedStageNotes = useMemo(
+    () =>
+      [...stageNotes].sort((left, right) => {
+        const pinDelta = Number(right.is_pinned) - Number(left.is_pinned);
+        if (pinDelta !== 0) {
+          return pinDelta;
+        }
+
+        return left.z - right.z || left.id - right.id;
+      }),
+    [stageNotes]
+  );
+
+  const scheduleStageNoteSync = useCallback(
+    (noteId: number, payload: Parameters<typeof updateRoomStageNote>[2]) => {
+      if (!token || !roomIdentifier) {
+        return;
+      }
+
+      const existingTimeout = noteSyncTimeoutsRef.current[noteId];
+      if (existingTimeout) {
+        window.clearTimeout(existingTimeout);
+      }
+
+      setStageNoteSyncStates((current) => ({ ...current, [noteId]: "saving" }));
+      noteSyncTimeoutsRef.current[noteId] = window.setTimeout(() => {
+        void updateRoomStageNote(roomIdentifier, noteId, payload, token)
+          .then(() => {
+            setStageNoteSyncStates((current) => ({ ...current, [noteId]: "saved" }));
+            window.setTimeout(() => {
+              setStageNoteSyncStates((current) =>
+                current[noteId] === "saved" ? { ...current, [noteId]: "idle" } : current
+              );
+            }, 1200);
+          })
+          .catch((err) => {
+            setStageNoteSyncStates((current) => ({ ...current, [noteId]: "error" }));
+            setError(err instanceof Error ? err.message : "Failed to sync room stage note");
+          })
+          .finally(() => {
+            delete noteSyncTimeoutsRef.current[noteId];
+          });
+      }, 350);
+    },
+    [roomIdentifier, token]
+  );
+
+  const updateLocalStageNote = useCallback(
+    (
+      noteId: number,
+      updater: (current: StageNoteDraft) => StageNoteDraft,
+      syncPayload?: Parameters<typeof updateRoomStageNote>[2]
+    ) => {
+      lastStageNoteEditAtRef.current = Date.now();
+      setStageNotes((current) =>
+        current.map((note) => (note.id === noteId ? updater(note) : note))
+      );
+      if (syncPayload) {
+        scheduleStageNoteSync(noteId, syncPayload);
+      }
+    },
+    [scheduleStageNoteSync]
+  );
 
   const handleResetStageLayout = () => {
     setSelectedStageTileId(null);
@@ -1608,6 +2051,90 @@ export default function RoomPage(): JSX.Element {
     }));
   };
 
+  const handleCreateStageNote = async () => {
+    if (!token || !roomIdentifier || !canEditSharedStageLayout) {
+      return;
+    }
+
+    const viewCenterX = (stageViewportSize.width / 2 - stageViewOffset.x) / stageZoom;
+    const viewCenterY = (stageViewportSize.height / 2 - stageViewOffset.y) / stageZoom;
+    const w = 300;
+    const h = 220;
+    const nextZ = Math.max(
+      1,
+      ...Object.values(activeStageLayouts).map((layout) => layout.z + 1),
+      ...stageNotes.map((note) => note.z + 1)
+    );
+
+    try {
+      const note = await createRoomStageNote(
+        roomIdentifier,
+        {
+          x: clamp(viewCenterX - w / 2, 0, stageSize.width - w),
+          y: clamp(viewCenterY - h / 2, 0, stageSize.height - h),
+          w,
+          h,
+          z: nextZ,
+          title: "",
+          body: "",
+          body_bold: false,
+          body_strike: false,
+          body_size: "md",
+        },
+        token
+      );
+
+      lastStageNoteEditAtRef.current = Date.now();
+      setStageNotes((current) => [
+        ...current,
+        {
+          id: note.id,
+          user_id: note.user_id,
+          username: note.username,
+          x: note.x,
+          y: note.y,
+          w: note.w,
+          h: note.h,
+          z: note.z,
+          title: note.title,
+          body: note.body,
+          body_bold: note.body_bold,
+          body_strike: note.body_strike,
+          body_size: note.body_size,
+          is_pinned: note.is_pinned,
+        },
+      ]);
+      setStageNoteSyncStates((current) => ({ ...current, [note.id]: "idle" }));
+      setSelectedStageTileId(`note:${note.id}`);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to create room stage note");
+    }
+  };
+
+  const handleDeleteStageNote = async (noteId: number) => {
+    if (!token || !roomIdentifier || !canEditSharedStageLayout) {
+      return;
+    }
+
+    try {
+      await deleteRoomStageNote(roomIdentifier, noteId, token);
+      lastStageNoteEditAtRef.current = Date.now();
+      setStageNotes((current) => current.filter((note) => note.id !== noteId));
+      setStageNoteSyncStates((current) => {
+        const next = { ...current };
+        delete next[noteId];
+        return next;
+      });
+      const existingTimeout = noteSyncTimeoutsRef.current[noteId];
+      if (existingTimeout) {
+        window.clearTimeout(existingTimeout);
+        delete noteSyncTimeoutsRef.current[noteId];
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to delete room stage note");
+    }
+  };
+
   const handleToggleSharedStageLock = async () => {
     if (!token || !roomIdentifier || !isCreator) {
       return;
@@ -1638,12 +2165,15 @@ export default function RoomPage(): JSX.Element {
       return;
     }
 
-    if (orderedStageTiles.some((tile) => tile.id === selectedStageTileId)) {
+    if (
+      orderedStageTiles.some((tile) => tile.id === selectedStageTileId) ||
+      orderedStageNotes.some((note) => `note:${note.id}` === selectedStageTileId)
+    ) {
       return;
     }
 
     setSelectedStageTileId(null);
-  }, [orderedStageTiles, selectedStageTileId]);
+  }, [orderedStageNotes, orderedStageTiles, selectedStageTileId]);
 
   useEffect(() => {
     if (orderedStageTiles.length === 0) {
@@ -1948,6 +2478,15 @@ export default function RoomPage(): JSX.Element {
                     {isSharedStageLocked ? "Unlock Shared" : "Lock Shared"}
                   </button>
                 )}
+                <button
+                  type="button"
+                  onClick={() => void handleCreateStageNote()}
+                  disabled={!canEditSharedStageLayout}
+                  className="flex h-10 items-center justify-center gap-2 border-2 border-[var(--pc-border)] bg-[var(--pc-bg)] px-[14px] font-mono text-[11px] font-bold uppercase tracking-[0.14em] text-[var(--pc-text)] transition-colors hover:bg-[var(--pc-surface-strong)] disabled:cursor-not-allowed disabled:opacity-40"
+                >
+                  <SquarePen className="h-3.5 w-3.5" />
+                  Add Note
+                </button>
                 <button
                   type="button"
                   onClick={() => setShowStageGrid((current) => !current)}
@@ -2332,6 +2871,119 @@ export default function RoomPage(): JSX.Element {
                       </StageTileShell>
                     );
                   })}
+                  {orderedStageNotes.map((note) => (
+                    <StageTileShell
+                      key={`note:${note.id}`}
+                      layout={{
+                        x: note.x,
+                        y: note.y,
+                        w: note.w,
+                        h: note.h,
+                        z: note.z,
+                      }}
+                      stageSize={stageSize}
+                      aspectRatio={note.w / Math.max(note.h, 1)}
+                      minWidth={220}
+                      minHeight={160}
+                      zoom={stageZoom}
+                      snapToGridEnabled={showStageGrid}
+                      preserveAspectRatio={false}
+                      editable={canEditSharedStageLayout}
+                      isPinned={note.is_pinned}
+                      isSelected={selectedStageTileId === `note:${note.id}`}
+                      onSelect={() => setSelectedStageTileId(`note:${note.id}`)}
+                      onBringToFront={() => {
+                        const nextZ = Math.max(
+                          1,
+                          ...Object.values(activeStageLayouts).map((layout) => layout.z + 1),
+                          ...stageNotes.map((entry) => entry.z + 1)
+                        );
+                        updateLocalStageNote(
+                          note.id,
+                          (current) => ({ ...current, z: nextZ }),
+                          { z: nextZ }
+                        );
+                      }}
+                      onLayoutChange={(nextLayout) => {
+                        updateLocalStageNote(
+                          note.id,
+                          (current) => ({
+                            ...current,
+                            x: nextLayout.x,
+                            y: nextLayout.y,
+                            w: nextLayout.w,
+                            h: nextLayout.h,
+                            z: nextLayout.z,
+                          }),
+                          {
+                            x: nextLayout.x,
+                            y: nextLayout.y,
+                            w: nextLayout.w,
+                            h: nextLayout.h,
+                            z: nextLayout.z,
+                          }
+                        );
+                      }}
+                    >
+                      <NoteTile
+                        note={note}
+                        editable={canEditSharedStageLayout}
+                        syncState={stageNoteSyncStates[note.id] ?? "idle"}
+                        onTitleChange={(nextTitle) => {
+                          updateLocalStageNote(
+                            note.id,
+                            (current) => ({ ...current, title: nextTitle }),
+                            { title: nextTitle }
+                          );
+                        }}
+                        onBodyChange={(nextBody) => {
+                          updateLocalStageNote(
+                            note.id,
+                            (current) => ({
+                              ...current,
+                              body: nextBody,
+                              body_bold: false,
+                              body_strike: false,
+                            }),
+                            {
+                              body: nextBody,
+                              body_bold: false,
+                              body_strike: false,
+                            }
+                          );
+                        }}
+                        onBodySizeCycle={() => {
+                          const order: StageNoteDraft["body_size"][] = ["sm", "md", "lg", "xl"];
+                          const nextSize = order[(order.indexOf(note.body_size) + 1) % order.length];
+                          updateLocalStageNote(
+                            note.id,
+                            (current) => ({ ...current, body_size: nextSize }),
+                            { body_size: nextSize }
+                          );
+                        }}
+                        onPinToggle={() => {
+                          const nextZ = Math.max(
+                            1,
+                            ...Object.values(activeStageLayouts).map((layout) => layout.z + 1),
+                            ...stageNotes.map((entry) => entry.z + 1)
+                          );
+                          updateLocalStageNote(
+                            note.id,
+                            (current) => ({
+                              ...current,
+                              is_pinned: !current.is_pinned,
+                              z: nextZ,
+                            }),
+                            {
+                              is_pinned: !note.is_pinned,
+                              z: nextZ,
+                            }
+                          );
+                        }}
+                        onDelete={() => void handleDeleteStageNote(note.id)}
+                      />
+                    </StageTileShell>
+                  ))}
                 </div>
               )}
             </div>

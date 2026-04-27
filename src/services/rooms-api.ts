@@ -39,6 +39,25 @@ export interface RoomVoiceParticipantState {
   updated_at: string;
 }
 
+export interface RoomStageNoteState {
+  id: number;
+  user_id: string;
+  username: string;
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  z: number;
+  title: string;
+  body: string;
+  body_bold: boolean;
+  body_strike: boolean;
+  body_size: "sm" | "md" | "lg" | "xl";
+  is_pinned: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface RoomStateResponse {
   room: {
     id: number;
@@ -67,6 +86,7 @@ export interface RoomStateResponse {
     shared_locked: boolean;
     can_edit_shared: boolean;
   };
+  stage_notes: RoomStageNoteState[];
 }
 
 export interface RoomVoiceCredentialsResponse {
@@ -89,6 +109,33 @@ export interface RoomSharedStageLayoutPayload {
     }
   >;
   pinned_tile_ids: string[];
+}
+
+export interface CreateRoomStageNotePayload {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  z: number;
+  title: string;
+  body: string;
+  body_bold: boolean;
+  body_strike: boolean;
+  body_size: "sm" | "md" | "lg" | "xl";
+}
+
+export interface UpdateRoomStageNotePayload {
+  x?: number;
+  y?: number;
+  w?: number;
+  h?: number;
+  z?: number;
+  title?: string;
+  body?: string;
+  body_bold?: boolean;
+  body_strike?: boolean;
+  body_size?: "sm" | "md" | "lg" | "xl";
+  is_pinned?: boolean;
 }
 
 // Функция для получения списка приглашений в комнаты (GET /api/rooms/invites)
@@ -216,6 +263,57 @@ export async function updateRoomSharedStageLayoutLock(
   });
   if (!response.ok) {
     throw new Error(await getAPIError(response, "Failed to update shared stage lock"));
+  }
+}
+
+export async function createRoomStageNote(
+  roomID: string,
+  payload: CreateRoomStageNotePayload,
+  token: string
+): Promise<RoomStageNoteState> {
+  const response = await fetch(`${API_BASE_URL}/rooms/${roomID}/stage-notes`, {
+    method: "POST",
+    headers: headers(token),
+    body: JSON.stringify(payload),
+  });
+  if (!response.ok) {
+    throw new Error(await getAPIError(response, "Failed to create room stage note"));
+  }
+
+  const data = await response.json();
+  return data.note as RoomStageNoteState;
+}
+
+export async function updateRoomStageNote(
+  roomID: string,
+  noteID: number,
+  payload: UpdateRoomStageNotePayload,
+  token: string
+): Promise<RoomStageNoteState> {
+  const response = await fetch(`${API_BASE_URL}/rooms/${roomID}/stage-notes/${noteID}`, {
+    method: "PUT",
+    headers: headers(token),
+    body: JSON.stringify(payload),
+  });
+  if (!response.ok) {
+    throw new Error(await getAPIError(response, "Failed to update room stage note"));
+  }
+
+  const data = await response.json();
+  return data.note as RoomStageNoteState;
+}
+
+export async function deleteRoomStageNote(
+  roomID: string,
+  noteID: number,
+  token: string
+): Promise<void> {
+  const response = await fetch(`${API_BASE_URL}/rooms/${roomID}/stage-notes/${noteID}`, {
+    method: "DELETE",
+    headers: headers(token),
+  });
+  if (!response.ok) {
+    throw new Error(await getAPIError(response, "Failed to delete room stage note"));
   }
 }
 
