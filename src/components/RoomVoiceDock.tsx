@@ -5,7 +5,7 @@ import { Mic, MicOff, Monitor, MonitorOff, PhoneOff, Video, VideoOff } from "luc
 import { useRoomVoice } from "../context/RoomVoiceContext";
 
 const buttonClass =
-  "w-10 h-10 rounded-full flex items-center justify-center transition-colors bg-gray-800 hover:bg-gray-700";
+  "flex h-9 w-9 items-center justify-center border-2 border-[var(--pc-border)] bg-[var(--pc-bg)] text-[var(--pc-text)] transition-colors hover:bg-[var(--pc-surface-strong)] disabled:cursor-not-allowed disabled:opacity-40";
 
 const RoomVoiceDock: React.FC = () => {
   const navigate = useNavigate();
@@ -22,14 +22,14 @@ const RoomVoiceDock: React.FC = () => {
   }
 
   return (
-    <div className="fixed right-6 bottom-6 z-40 w-[360px] rounded-2xl border border-gray-700 bg-gray-900/95 shadow-2xl backdrop-blur">
-      <div className="flex items-center justify-between px-4 py-3 border-b border-gray-800">
+    <div className="fixed bottom-5 right-5 z-40 w-[320px] border-2 border-[var(--pc-border)] bg-[var(--pc-panel)] text-[var(--pc-text)] shadow-[0_10px_40px_rgba(0,0,0,0.45)]">
+      <div className="flex items-center justify-between border-b-2 border-[var(--pc-border)] px-4 py-3">
         <div>
-          <div className="text-xs uppercase tracking-[0.2em] text-emerald-300/80">
+          <div className="font-mono text-[11px] font-bold uppercase tracking-[0.16em] text-[var(--pc-text-muted)]">
             Room Voice
           </div>
-          <div className="text-sm font-semibold text-white">{state.roomName || state.roomId}</div>
-          <div className="text-xs text-white/60">
+          <div className="text-sm font-semibold text-[var(--pc-text)]">{state.roomName || state.roomId}</div>
+          <div className="text-xs text-[var(--pc-text-soft)]">
             {state.status === "connecting"
               ? "Connecting..."
               : `${state.participants.length} connected`}
@@ -39,9 +39,9 @@ const RoomVoiceDock: React.FC = () => {
         <button
           type="button"
           onClick={() => navigate(`/room/${state.roomId}`, { state: { roomName: state.roomName } })}
-          className="px-3 py-1.5 rounded-lg bg-emerald-500 hover:bg-emerald-400 text-sm font-medium text-gray-950 transition-colors"
+          className="border-2 border-[var(--pc-border)] bg-[var(--pc-action-inverse-bg)] px-3 py-2 font-mono text-[11px] font-bold uppercase tracking-[0.14em] text-[var(--pc-action-inverse-text)] transition-colors hover:bg-[var(--pc-action-inverse-hover)]"
         >
-          Open Room
+          Open
         </button>
       </div>
 
@@ -55,9 +55,9 @@ const RoomVoiceDock: React.FC = () => {
             title={state.localMuted ? "Unmute" : "Mute"}
           >
             {state.localMuted ? (
-              <Mic className="w-4 h-4 text-white" />
+              <Mic className="h-4 w-4" />
             ) : (
-              <MicOff className="w-4 h-4 text-red-400" />
+              <MicOff className="h-4 w-4" />
             )}
           </button>
 
@@ -69,9 +69,9 @@ const RoomVoiceDock: React.FC = () => {
             title={state.localCameraOff ? "Turn on camera" : "Turn off camera"}
           >
             {state.localCameraOff ? (
-              <Video className="w-4 h-4 text-white" />
+              <Video className="h-4 w-4" />
             ) : (
-              <VideoOff className="w-4 h-4 text-red-400" />
+              <VideoOff className="h-4 w-4" />
             )}
           </button>
 
@@ -83,9 +83,9 @@ const RoomVoiceDock: React.FC = () => {
             title={state.screenSharing ? "Stop sharing" : "Share screen"}
           >
             {state.screenSharing ? (
-              <MonitorOff className="w-4 h-4 text-red-400" />
+              <MonitorOff className="h-4 w-4" />
             ) : (
-              <Monitor className="w-4 h-4 text-white" />
+              <Monitor className="h-4 w-4" />
             )}
           </button>
         </div>
@@ -93,15 +93,17 @@ const RoomVoiceDock: React.FC = () => {
         <button
           type="button"
           onClick={() => void leaveRoomVoiceSession()}
-          className="w-11 h-11 rounded-full flex items-center justify-center bg-red-500 hover:bg-red-400 transition-colors"
+          className="flex h-10 w-10 items-center justify-center bg-[var(--pc-action-inverse-bg)] text-[var(--pc-action-inverse-text)] transition-colors hover:bg-[var(--pc-action-inverse-hover)]"
           title="Leave voice"
         >
-          <PhoneOff className="w-5 h-5 text-white" />
+          <PhoneOff className="h-4 w-4" />
         </button>
       </div>
 
       {state.error && (
-        <div className="px-4 pb-3 text-xs text-red-300">{state.error}</div>
+        <div className="border-t-2 border-[var(--pc-border)] px-4 py-3 font-mono text-[11px] uppercase tracking-[0.14em] text-[var(--pc-text)]">
+          {state.error}
+        </div>
       )}
     </div>
   );

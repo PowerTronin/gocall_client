@@ -1,20 +1,23 @@
-import React, { useState, useEffect, useCallback, useRef } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { MessageCircle, Trash2, Video } from "lucide-react";
+import { MessageCircle, Search, Trash2, Video } from "lucide-react";
 
 import { useAuth } from "../context/AuthContext";
-import Button from "../components/Button";
 import {
-  fetchFriendRequests,
   acceptFriendRequest,
   declineFriendRequest,
-  requestFriend,
+  fetchFriendRequests,
   fetchFriends,
-  searchUsers,
   removeFriend,
+  requestFriend,
+  searchUsers,
 } from "../services/friends-api";
 import { getOrCreateDirectRoom } from "../services/rooms-api";
-import { FriendRequest, Friend, UserInfo } from "../types";
+import { Friend, FriendRequest, UserInfo } from "../types";
+
+const panelClass = "border-2 border-[var(--pc-border)] bg-[var(--pc-panel)]";
+const actionButtonClass =
+  "inline-flex items-center justify-center border-2 border-[var(--pc-border)] px-3 py-2 font-mono text-[11px] font-bold uppercase tracking-[0.14em] transition-colors";
 
 const FriendsPage: React.FC = () => {
   const { token, user: currentUser } = useAuth();
@@ -49,7 +52,7 @@ const FriendsPage: React.FC = () => {
   }, [token]);
 
   useEffect(() => {
-    loadData();
+    void loadData();
   }, [loadData]);
 
   useEffect(() => {
@@ -65,8 +68,6 @@ const FriendsPage: React.FC = () => {
   const performSearch = useCallback(
     async (rawQuery: string) => {
       const q = rawQuery.trim();
-
-      // Clear stale error as the user types / retries.
       setError("");
 
       if (q.length === 0) {
@@ -115,8 +116,8 @@ const FriendsPage: React.FC = () => {
     [token, friends, currentUser]
   );
 
-  const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const value = e.target.value;
+  const handleInputChange = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const value = event.target.value;
     setSearchQuery(value);
     setError("");
 
@@ -148,16 +149,13 @@ const FriendsPage: React.FC = () => {
 
   const handleSendFriendRequest = async (targetUser: { id: number; username: string }) => {
     if (!token) return;
-    if (
-      targetUser.username === currentUser?.username ||
-      targetUser.id === currentUser?.id
-    ) {
-      setError("Нельзя добавить себя в друзья");
+    if (targetUser.username === currentUser?.username || targetUser.id === currentUser?.id) {
+      setError("You cannot add yourself");
       return;
     }
     try {
       await requestFriend(targetUser.username, token);
-      setSuccess(`Заявка в друзья для ${targetUser.username} отправлена`);
+      setSuccess(`Friend request sent to ${targetUser.username}`);
       setTimeout(() => setSuccess(""), 3000);
       setSearchResults((prev) => prev.filter((foundUser) => foundUser.id !== targetUser.id));
       setSearchQuery("");
@@ -196,7 +194,7 @@ const FriendsPage: React.FC = () => {
     try {
       await removeFriend(friend.username, token);
       setFriends((current) => current.filter((item) => item.user_id !== friend.user_id));
-      setSuccess(`${friend.username} удалён из друзей`);
+      setSuccess(`${friend.username} removed`);
       setTimeout(() => setSuccess(""), 3000);
     } catch (err: any) {
       setError(err.message || "Failed to remove friend");
@@ -223,39 +221,68 @@ const FriendsPage: React.FC = () => {
   };
 
   return (
-    <div className="min-h-screen flex flex-col p-6">
-      <h1 className="text-2xl font-bold mb-4">Друзья</h1>
+    <div className="space-y-6 text-[var(--pc-text)]">
+      <section className={`${panelClass} p-5`}>
+        <div className="mb-4">
+          <div className="font-mono text-[11px] font-bold uppercase tracking-[0.18em] text-[var(--pc-text-muted)]">
+            Power-Call // Friends
+          </div>
+          <h1 className="mt-2 text-3xl font-semibold">Friends & Contacts</h1>
+          <p className="mt-1 text-sm text-[var(--pc-text-muted)]">
+            Manage direct contacts, incoming requests, and private voice rooms.
+          </p>
+        </div>
 
-      <div className="mb-4 flex gap-2">
-        <input
-          type="text"
-          placeholder="Поиск друзей..."
-          value={searchQuery}
-          onChange={handleInputChange}
-          className="border p-2 rounded w-full"
-        />
-        <Button variant="primary" onClick={handleSearchClick}>
-          Найти
-        </Button>
-      </div>
+        <div className="flex flex-col gap-3 xl:flex-row">
+          <div className="relative min-w-0 flex-1">
+            <Search className="pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-[var(--pc-text-subtle)]" />
+            <input
+              type="text"
+              placeholder="Search users by username"
+              value={searchQuery}
+              onChange={handleInputChange}
+              className="w-full border-2 border-[var(--pc-border)] bg-[var(--pc-bg)] py-3 pl-11 pr-4 text-sm text-[var(--pc-text)] outline-none placeholder:text-[var(--pc-text-subtle)]"
+            />
+          </div>
+          <button
+            type="button"
+            onClick={handleSearchClick}
+            className={`${actionButtonClass} bg-[var(--pc-action-inverse-bg)] text-[var(--pc-action-inverse-text)] hover:bg-[var(--pc-action-inverse-hover)]`}
+          >
+            Search
+          </button>
+        </div>
 
-      {showMinQueryHint && (
-        <p className="text-gray-500 mb-4">Введите минимум 3 символа для поиска</p>
-      )}
-      {isSearching && <p className="text-gray-500">Идёт поиск...</p>}
+        <div className="mt-3 flex flex-wrap gap-3 text-sm">
+          {showMinQueryHint && <span className="text-[var(--pc-text-soft)]">Enter at least 3 characters</span>}
+          {isSearching && <span className="text-[var(--pc-text-soft)]">Searching...</span>}
+          {success && <span className="text-[var(--pc-text)]">{success}</span>}
+          {error && <span className="text-[var(--pc-text)]">{error}</span>}
+        </div>
+      </section>
+
       {searchResults.length > 0 && (
-        <section className="mb-6">
-          <h2 className="text-xl font-semibold mb-4">Результаты поиска</h2>
-          <div className="grid gap-2">
-            {searchResults.map((user, index) => (
+        <section className={`${panelClass} p-5`}>
+          <div className="mb-4">
+            <div className="font-mono text-[11px] font-bold uppercase tracking-[0.16em] text-[var(--pc-text-muted)]">
+              Directory Match
+            </div>
+            <h2 className="mt-2 text-xl font-semibold">Search Results</h2>
+          </div>
+          <div className="grid gap-3 xl:grid-cols-2">
+            {searchResults.map((searchUser, index) => (
               <div
-                key={user.username || `user-${index}`}
-                className="flex items-center justify-between p-3 rounded-lg bg-white shadow-sm"
+                key={searchUser.username || `user-${index}`}
+                className="flex items-center justify-between gap-3 border-2 border-[var(--pc-border)] bg-[var(--pc-bg)] px-4 py-3"
               >
-                <span>{user.username}</span>
-                <Button variant="primary" size="sm" onClick={() => handleSendFriendRequest(user)}>
-                  Добавить в друзья
-                </Button>
+                <span className="truncate text-sm">{searchUser.username}</span>
+                <button
+                  type="button"
+                  onClick={() => void handleSendFriendRequest(searchUser)}
+                  className={`${actionButtonClass} bg-[var(--pc-action-inverse-bg)] text-[var(--pc-action-inverse-text)] hover:bg-[var(--pc-action-inverse-hover)]`}
+                >
+                  Add Friend
+                </button>
               </div>
             ))}
           </div>
@@ -263,25 +290,38 @@ const FriendsPage: React.FC = () => {
       )}
 
       {friendRequests.length > 0 && (
-        <section className="mb-6">
-          <h2 className="text-xl font-semibold mb-4">Заявки в друзья</h2>
-          <div className="grid gap-2">
-            {friendRequests.map((req) => (
+        <section className={`${panelClass} p-5`}>
+          <div className="mb-4">
+            <div className="font-mono text-[11px] font-bold uppercase tracking-[0.16em] text-[var(--pc-text-muted)]">
+              Queue
+            </div>
+            <h2 className="mt-2 text-xl font-semibold">Friend Requests</h2>
+          </div>
+          <div className="space-y-3">
+            {friendRequests.map((request) => (
               <div
-                key={req.id}
-                className="flex items-center justify-between p-3 rounded-lg bg-white shadow-sm"
+                key={request.id}
+                className="flex flex-col gap-3 border-2 border-[var(--pc-border)] bg-[var(--pc-bg)] p-4 xl:flex-row xl:items-center xl:justify-between"
               >
-                <span>
-                  <strong className="text-blue-600">{req.from_username}</strong> хочет добавить вас
-                  в друзья
-                </span>
+                <div className="text-sm">
+                  <span className="font-semibold text-[var(--pc-text)]">{request.from_username}</span>
+                  <span className="text-[var(--pc-text-muted)]"> wants to add you as a friend</span>
+                </div>
                 <div className="flex gap-2">
-                  <Button variant="primary" size="sm" onClick={() => handleAcceptFriendRequest(req)}>
-                    Принять
-                  </Button>
-                  <Button variant="ghost" size="sm" onClick={() => handleDeclineFriendRequest(req)}>
-                    Отклонить
-                  </Button>
+                  <button
+                    type="button"
+                    onClick={() => void handleAcceptFriendRequest(request)}
+                    className={`${actionButtonClass} bg-[var(--pc-action-inverse-bg)] text-[var(--pc-action-inverse-text)] hover:bg-[var(--pc-action-inverse-hover)]`}
+                  >
+                    Accept
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => void handleDeclineFriendRequest(request)}
+                    className={`${actionButtonClass} bg-[var(--pc-bg)] text-[var(--pc-text)] hover:bg-[var(--pc-surface-strong)]`}
+                  >
+                    Decline
+                  </button>
                 </div>
               </div>
             ))}
@@ -289,44 +329,78 @@ const FriendsPage: React.FC = () => {
         </section>
       )}
 
-      <div className="grid gap-4">
-        {friends.length === 0 ? (
-          <p className="text-gray-500">Нет друзей. Найдите пользователя и добавьте его в друзья.</p>
-        ) : (
-          friends.map((friend) => (
-            <div
-              key={friend.id}
-              className="flex justify-between items-center p-4 border rounded-lg shadow-sm bg-white"
-            >
-              <span>{friend.username}</span>
-              <div className="flex gap-2">
-                <Button variant="primary" size="sm" onClick={() => goToChat(friend)}>
-                  <MessageCircle className="h-5 w-5" />
-                </Button>
-                <Button
-                  variant="secondary"
-                  size="sm"
-                  onClick={() => handleVideoCall(friend)}
-                  title="Open private voice room"
-                >
-                  <Video className="h-5 w-5" />
-                </Button>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => handleRemoveFriend(friend)}
-                  title="Remove friend"
-                >
-                  <Trash2 className="h-5 w-5 text-red-500" />
-                </Button>
-              </div>
+      <section className={`${panelClass} p-5`}>
+        <div className="mb-4 flex items-center justify-between">
+          <div>
+            <div className="font-mono text-[11px] font-bold uppercase tracking-[0.16em] text-[var(--pc-text-muted)]">
+              Network
             </div>
-          ))
-        )}
-      </div>
+            <h2 className="mt-2 text-xl font-semibold">Friends</h2>
+          </div>
+          <div className="font-mono text-xs uppercase tracking-[0.14em] text-[var(--pc-text-soft)]">
+            {friends.length} total
+          </div>
+        </div>
 
-      {success && <div className="text-green-500 mt-4">{success}</div>}
-      {error && <div className="text-red-500 mt-4">{error}</div>}
+        {friends.length === 0 ? (
+          <div className="border-2 border-[var(--pc-border)] bg-[var(--pc-bg)] p-8 text-center text-[var(--pc-text-muted)]">
+            No friends yet. Search for a user to start building your network.
+          </div>
+        ) : (
+          <div className="grid gap-4 xl:grid-cols-2">
+            {friends.map((friend) => (
+              <div
+                key={friend.id}
+                className="flex flex-col gap-4 border-2 border-[var(--pc-border)] bg-[var(--pc-bg)] p-4 xl:flex-row xl:items-center xl:justify-between"
+              >
+                <div className="min-w-0">
+                  <div className="flex items-center gap-3">
+                    <div
+                      className={`h-2.5 w-2.5 rounded-full ${
+                        friend.is_online ? "bg-[var(--pc-online)]" : "bg-[var(--pc-offline)]"
+                      }`}
+                    />
+                    <div className="truncate text-base font-semibold">{friend.username}</div>
+                  </div>
+                  <div className="mt-2 font-mono text-[11px] uppercase tracking-[0.14em] text-[var(--pc-text-subtle)]">
+                    {friend.is_online ? "online" : "offline"}
+                  </div>
+                </div>
+
+                <div className="flex flex-wrap gap-2">
+                  <button
+                    type="button"
+                    onClick={() => goToChat(friend)}
+                    className={`${actionButtonClass} gap-2 bg-[var(--pc-action-inverse-bg)] text-[var(--pc-action-inverse-text)] hover:bg-[var(--pc-action-inverse-hover)]`}
+                    title="Open chat"
+                  >
+                    <MessageCircle className="h-4 w-4" />
+                    Chat
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => void handleVideoCall(friend)}
+                    className={`${actionButtonClass} gap-2 bg-[var(--pc-bg)] text-[var(--pc-text)] hover:bg-[var(--pc-surface-strong)]`}
+                    title="Open private voice room"
+                  >
+                    <Video className="h-4 w-4" />
+                    Voice
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => void handleRemoveFriend(friend)}
+                    className={`${actionButtonClass} gap-2 bg-[var(--pc-bg)] text-[var(--pc-text)] hover:bg-[var(--pc-surface-strong)]`}
+                    title="Remove friend"
+                  >
+                    <Trash2 className="h-4 w-4" />
+                    Remove
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </section>
     </div>
   );
 };

@@ -3,14 +3,21 @@ const trimTrailingSlashes = (value: string): string => value.replace(/\/+$/, "")
 const envApiBaseUrl = import.meta.env.VITE_API_BASE_URL?.trim();
 const envWsUrl = import.meta.env.VITE_WS_URL?.trim();
 
+const isLocalDevHost = (hostname: string, port: string): boolean => {
+  const isLoopbackHost =
+    hostname === "localhost" || hostname === "127.0.0.1" || hostname === "::1";
+
+  return isLoopbackHost && (port === "1420" || port === "4173" || port === "5173");
+};
+
 const getDefaultApiBaseUrl = (): string => {
   if (typeof window === "undefined") {
     return "http://localhost:8080/api";
   }
 
-  const { origin, port } = window.location;
-  if (port === "1420") {
-    return "http://localhost:8080/api";
+  const { origin, hostname, port } = window.location;
+  if (isLocalDevHost(hostname, port)) {
+    return `http://${hostname}:8080/api`;
   }
 
   return `${origin}/api`;
@@ -21,9 +28,10 @@ const getDefaultWsBaseUrl = (): string => {
     return "ws://localhost:8080/api/chat/ws";
   }
 
-  const { host, port, protocol } = window.location;
-  if (port === "1420") {
-    return "ws://localhost:8080/api/chat/ws";
+  const { host, hostname, port, protocol } = window.location;
+  if (isLocalDevHost(hostname, port)) {
+    const wsProtocol = protocol === "https:" ? "wss:" : "ws:";
+    return `${wsProtocol}//${hostname}:8080/api/chat/ws`;
   }
 
   const wsProtocol = protocol === "https:" ? "wss:" : "ws:";

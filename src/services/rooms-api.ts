@@ -52,6 +52,21 @@ export interface RoomStateResponse {
   members: RoomMemberState[];
   voice_participants: RoomVoiceParticipantState[];
   in_voice: boolean;
+  stage_layout: {
+    stage_layouts: Record<
+      string,
+      {
+        x: number;
+        y: number;
+        w: number;
+        h: number;
+        z: number;
+      }
+    >;
+    pinned_tile_ids: string[];
+    shared_locked: boolean;
+    can_edit_shared: boolean;
+  };
 }
 
 export interface RoomVoiceCredentialsResponse {
@@ -60,6 +75,20 @@ export interface RoomVoiceCredentialsResponse {
   room_name: string;
   identity: string;
   name: string;
+}
+
+export interface RoomSharedStageLayoutPayload {
+  stage_layouts: Record<
+    string,
+    {
+      x: number;
+      y: number;
+      w: number;
+      h: number;
+      z: number;
+    }
+  >;
+  pinned_tile_ids: string[];
 }
 
 // Функция для получения списка приглашений в комнаты (GET /api/rooms/invites)
@@ -158,6 +187,36 @@ export async function fetchRoomState(roomID: string, token: string): Promise<Roo
     throw new Error(await getAPIError(response, "Failed to fetch room state"));
   }
   return response.json();
+}
+
+export async function updateRoomSharedStageLayout(
+  roomID: string,
+  payload: RoomSharedStageLayoutPayload,
+  token: string
+): Promise<void> {
+  const response = await fetch(`${API_BASE_URL}/rooms/${roomID}/stage-layout`, {
+    method: "PUT",
+    headers: headers(token),
+    body: JSON.stringify(payload),
+  });
+  if (!response.ok) {
+    throw new Error(await getAPIError(response, "Failed to update shared stage layout"));
+  }
+}
+
+export async function updateRoomSharedStageLayoutLock(
+  roomID: string,
+  sharedLocked: boolean,
+  token: string
+): Promise<void> {
+  const response = await fetch(`${API_BASE_URL}/rooms/${roomID}/stage-layout/lock`, {
+    method: "PUT",
+    headers: headers(token),
+    body: JSON.stringify({ shared_locked: sharedLocked }),
+  });
+  if (!response.ok) {
+    throw new Error(await getAPIError(response, "Failed to update shared stage lock"));
+  }
 }
 
 export async function joinRoomVoice(roomID: string, token: string): Promise<void> {

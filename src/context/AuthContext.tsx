@@ -63,7 +63,19 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   return (
     <AuthContext.Provider value={{ token, user, setToken, logout }}>
-      {!loading ? children : <div>Loading...</div>}
+      {!loading ? children : (
+        <div className="flex h-screen items-center justify-center bg-[var(--pc-bg)] px-4 text-[var(--pc-text)]">
+          <div className="w-full max-w-lg border-2 border-[var(--pc-border)] bg-[var(--pc-panel)] p-8 text-center">
+            <div className="font-mono text-[11px] font-bold uppercase tracking-[0.18em] text-[var(--pc-text-muted)]">
+              Power-Call // Session
+            </div>
+            <h1 className="mt-4 text-2xl font-semibold">Restoring operator state</h1>
+            <p className="mt-2 text-sm text-[var(--pc-text-muted)]">
+              Rehydrating token and identity for the current client session.
+            </p>
+          </div>
+        </div>
+      )}
     </AuthContext.Provider>
   );
 };
