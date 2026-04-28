@@ -2,6 +2,11 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
 import {
   ArrowLeft,
+  ChevronDown,
+  Copy,
+  Settings,
+  ImagePlus,
+  Lock,
   Maximize2,
   Mic,
   MicOff,
@@ -11,6 +16,10 @@ import {
   Pin,
   PhoneOff,
   Radio,
+  SquarePen,
+  StickyNote,
+  Trash2,
+  Unlock,
   Video,
   VideoOff,
 } from "lucide-react";
@@ -20,12 +29,18 @@ import { getStageLayoutPreference, type StageLayoutPreference } from "../app-pre
 import { useAuth } from "../context/AuthContext";
 import { useRoomVoice } from "../context/RoomVoiceContext";
 import {
+  createRoomStageImage,
+  createRoomStageNote,
+  deleteRoomStageImage,
+  deleteRoomStageNote,
   fetchRoomState,
   joinRoomAsMember,
   RoomStateResponse,
   RoomVoiceParticipantState,
   updateRoomSharedStageLayout,
   updateRoomSharedStageLayoutLock,
+  updateRoomStageImage,
+  updateRoomStageNote,
 } from "../services/rooms-api";
 interface ControlButtonProps {
   icon: React.ReactNode;
@@ -52,6 +67,44 @@ interface VisualTile {
   track: Track;
   audioTrack?: Track;
 }
+
+interface StageNoteDraft {
+  id: number;
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  z: number;
+  title: string;
+  body: string;
+  body_bold: boolean;
+  body_strike: boolean;
+  body_size: "sm" | "md" | "lg" | "xl";
+  color: "amber" | "blue" | "green" | "pink" | "slate";
+  is_pinned: boolean;
+  is_locked: boolean;
+  user_id: string;
+  username: string;
+}
+
+interface StageImageDraft {
+  id: number;
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  z: number;
+  src: string;
+  file_name: string;
+  caption: string;
+  bg_mode: "grid" | "light" | "dark" | "transparent";
+  is_pinned: boolean;
+  is_locked: boolean;
+  user_id: string;
+  username: string;
+}
+
+type StageNoteSyncState = "idle" | "saving" | "saved" | "error";
 
 type RoomLayoutMode = "grid" | "stage";
 
@@ -93,6 +146,130 @@ const getStageStorageKey = (roomIdentifier: string) => `power-call:room-layout:$
 
 const clamp = (value: number, min: number, max: number) => Math.min(Math.max(value, min), max);
 
+const escapeHtml = (value: string) =>
+  value
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+
+const isProbablyHtml = (value: string) => /<\/?[a-z][\s\S]*>/i.test(value);
+
+const sanitizeNoteBodyHtml = (value: string): string => {
+  if (!value.trim()) {
+    return "";
+  }
+
+  if (typeof document === "undefined") {
+    return escapeHtml(value).replace(/\n/g, "<br>");
+  }
+
+  const source = document.createElement("div");
+  source.innerHTML = value;
+
+  const sanitizeNode = (node: Node): string => {
+    if (node.nodeType === Node.TEXT_NODE) {
+      return escapeHtml(node.textContent ?? "");
+    }
+
+    if (node.nodeType !== Node.ELEMENT_NODE) {
+      return "";
+    }
+
+    const element = node as HTMLElement;
+    const children = Array.from(element.childNodes).map(sanitizeNode).join("");
+    const tag = element.tagName.toLowerCase();
+
+    if (tag === "br") {
+      return "<br>";
+    }
+
+    if (tag === "b" || tag === "strong") {
+      return `<strong>${children}</strong>`;
+    }
+
+    if (tag === "s" || tag === "strike" || tag === "del") {
+      return `<s>${children}</s>`;
+    }
+
+    if (tag === "div" || tag === "p") {
+      return children ? `<div>${children}</div>` : "<div><br></div>";
+    }
+
+    return children;
+  };
+
+  const sanitized = Array.from(source.childNodes).map(sanitizeNode).join("");
+  const normalized = sanitized.replace(/^(<div><br><\/div>|<br>)+|(<div><br><\/div>|<br>)+$/g, "");
+
+  if (!normalized) {
+    return "";
+  }
+
+  const check = document.createElement("div");
+  check.innerHTML = normalized;
+  return (check.textContent ?? "").trim() ? normalized : "";
+};
+
+const getNoteBodyEditorHtml = (body: string, legacyBold: boolean, legacyStrike: boolean) => {
+  const baseHtml = isProbablyHtml(body) ? sanitizeNoteBodyHtml(body) : escapeHtml(body).replace(/\n/g, "<br>");
+  let nextHtml = baseHtml;
+
+  if (legacyBold && nextHtml) {
+    nextHtml = `<strong>${nextHtml}</strong>`;
+  }
+
+  if (legacyStrike && nextHtml) {
+    nextHtml = `<s>${nextHtml}</s>`;
+  }
+
+  return sanitizeNoteBodyHtml(nextHtml);
+};
+
+const getNoteBodySizeClass = (size: StageNoteDraft["body_size"]) => {
+  switch (size) {
+    case "sm":
+      return "text-xs";
+    case "md":
+      return "text-lg";
+    case "lg":
+      return "text-2xl";
+    case "xl":
+      return "text-4xl";
+    default:
+      return "text-lg";
+  }
+};
+
+const getStageImageBgClass = (mode: StageImageDraft["bg_mode"]) => {
+  switch (mode) {
+    case "light":
+      return "bg-white";
+    case "dark":
+      return "bg-black";
+    case "transparent":
+      return "bg-transparent";
+    case "grid":
+    default:
+      return "bg-[linear-gradient(45deg,rgba(127,127,127,0.18)_25%,transparent_25%,transparent_75%,rgba(127,127,127,0.18)_75%,rgba(127,127,127,0.18)),linear-gradient(45deg,rgba(127,127,127,0.18)_25%,transparent_25%,transparent_75%,rgba(127,127,127,0.18)_75%,rgba(127,127,127,0.18))] bg-[length:18px_18px] bg-[position:0_0,9px_9px]";
+  }
+};
+
+const getStageImageBgLabel = (mode: StageImageDraft["bg_mode"]) => {
+  switch (mode) {
+    case "light":
+      return "Light";
+    case "dark":
+      return "Dark";
+    case "transparent":
+      return "Clear";
+    case "grid":
+    default:
+      return "Grid";
+  }
+};
+
 const clampStageViewOffset = (
   offset: StageViewportOffset,
   stageSize: { width: number; height: number },
@@ -124,6 +301,21 @@ const getCenteredStageViewOffset = (
     viewportSize,
     zoom
   );
+
+const getZoomAnchoredStageViewOffset = (
+  anchor: { x: number; y: number },
+  currentOffset: StageViewportOffset,
+  currentZoom: number,
+  nextZoom: number
+): StageViewportOffset => {
+  const worldX = (anchor.x - currentOffset.x) / currentZoom;
+  const worldY = (anchor.y - currentOffset.y) / currentZoom;
+
+  return {
+    x: anchor.x - worldX * nextZoom,
+    y: anchor.y - worldY * nextZoom,
+  };
+};
 
 const snapValue = (value: number, targets: number[], threshold = 10) => {
   for (const target of targets) {
@@ -455,6 +647,9 @@ const TileActionButton: React.FC<TileActionButtonProps> = ({
   return (
     <button
       type="button"
+      onMouseDown={(event) => {
+        event.preventDefault();
+      }}
       onClick={(event) => {
         event.stopPropagation();
         onClick();
@@ -866,13 +1061,352 @@ const ScreenShareTile: React.FC<{
   );
 };
 
+const NoteTile: React.FC<{
+  note: StageNoteDraft;
+  editable?: boolean;
+  syncState?: StageNoteSyncState;
+  onTitleChange: (nextTitle: string) => void;
+  onBodyChange: (
+    nextBody: string,
+    options?: {
+      clearLegacyFormatting?: boolean;
+    }
+  ) => void;
+  onBodySizeCycle: () => void;
+  onDuplicate?: () => void;
+  onLockToggle?: () => void;
+  onPinToggle?: () => void;
+  onDelete?: () => void;
+}> = ({
+  note,
+  editable = true,
+  syncState = "idle",
+  onTitleChange,
+  onBodyChange,
+  onBodySizeCycle,
+  onDuplicate,
+  onLockToggle,
+  onPinToggle,
+  onDelete,
+}) => {
+  const bodyEditorRef = useRef<HTMLDivElement>(null);
+  const [formatState, setFormatState] = useState({
+    bold: note.body_bold,
+    strike: note.body_strike,
+  });
+  const syncLabel =
+    syncState === "saving"
+      ? "Saving"
+      : syncState === "saved"
+        ? "Saved"
+        : syncState === "error"
+          ? "Error"
+          : note.username || "Room note";
+  const editorHtml = getNoteBodyEditorHtml(note.body, note.body_bold, note.body_strike);
+
+  useEffect(() => {
+    const editor = bodyEditorRef.current;
+    if (!editor) {
+      return;
+    }
+
+    if (document.activeElement !== editor && editor.innerHTML !== editorHtml) {
+      editor.innerHTML = editorHtml;
+    }
+  }, [editorHtml]);
+
+  const updateFormatState = useCallback(() => {
+    if (typeof document === "undefined") {
+      return;
+    }
+
+    setFormatState({
+      bold: document.queryCommandState("bold"),
+      strike: document.queryCommandState("strikeThrough"),
+    });
+  }, []);
+
+  useEffect(() => {
+    const handleSelectionChange = () => {
+      const editor = bodyEditorRef.current;
+      if (!editor) {
+        return;
+      }
+
+      const selection = document.getSelection();
+      if (!selection?.anchorNode || !editor.contains(selection.anchorNode)) {
+        return;
+      }
+
+      updateFormatState();
+    };
+
+    document.addEventListener("selectionchange", handleSelectionChange);
+    return () => document.removeEventListener("selectionchange", handleSelectionChange);
+  }, [updateFormatState]);
+
+  const syncEditorBody = useCallback(() => {
+    const editor = bodyEditorRef.current;
+    if (!editor) {
+      return;
+    }
+
+    const nextBody = sanitizeNoteBodyHtml(editor.innerHTML);
+    onBodyChange(nextBody, { clearLegacyFormatting: true });
+    updateFormatState();
+  }, [onBodyChange, updateFormatState]);
+
+  const applyInlineFormat = useCallback(
+    (command: "bold" | "strikeThrough") => {
+      if (!editable || typeof document === "undefined") {
+        return;
+      }
+
+      const editor = bodyEditorRef.current;
+      if (!editor) {
+        return;
+      }
+
+      editor.focus();
+      document.execCommand(command, false);
+      syncEditorBody();
+    },
+    [editable, syncEditorBody]
+  );
+
+  return (
+    <div className="group relative flex h-full flex-col overflow-hidden border-[3px] border-[var(--pc-border)] bg-[var(--pc-panel)] p-[3px]">
+      <div className="flex items-center justify-between border-b-2 border-[var(--pc-border)] bg-[var(--pc-surface-2)] px-[10px] py-2">
+        <div className="min-w-0">
+          <div className="flex items-center gap-2">
+            <StickyNote className="h-3.5 w-3.5" />
+            <div className="font-mono text-[10px] font-bold uppercase tracking-[0.16em] text-[var(--pc-text)]">
+              Note
+            </div>
+          </div>
+          <div className="mt-1 truncate font-mono text-[9px] uppercase tracking-[0.12em] text-[var(--pc-text-muted)]">
+            {syncLabel}
+          </div>
+        </div>
+        <div className="flex items-center gap-1.5">
+          <TileActionButton
+            label="Bold"
+            onClick={() => applyInlineFormat("bold")}
+            icon={<span className="font-mono text-[10px] font-bold">B</span>}
+            isActive={formatState.bold}
+            disabled={!editable}
+          />
+          <TileActionButton
+            label="Strike"
+            onClick={() => applyInlineFormat("strikeThrough")}
+            icon={<span className="font-mono text-[10px] line-through">S</span>}
+            isActive={formatState.strike}
+            disabled={!editable}
+          />
+          {onDuplicate && (
+            <TileActionButton
+              label="Duplicate note"
+              onClick={onDuplicate}
+              icon={<Copy className="h-3.5 w-3.5" />}
+              disabled={!editable}
+            />
+          )}
+          {onLockToggle && (
+            <TileActionButton
+              label={note.is_locked ? "Unlock note" : "Lock note"}
+              onClick={onLockToggle}
+              icon={note.is_locked ? <Unlock className="h-3.5 w-3.5" /> : <Lock className="h-3.5 w-3.5" />}
+              isActive={note.is_locked}
+              disabled={!editable}
+            />
+          )}
+          {onPinToggle && (
+            <TileActionButton
+              label={note.is_pinned ? "Unpin note" : "Pin note"}
+              onClick={onPinToggle}
+              icon={<Pin className="h-3.5 w-3.5" />}
+              isActive={note.is_pinned}
+              disabled={!editable}
+            />
+          )}
+          {onDelete && (
+            <TileActionButton
+              label="Delete note"
+              onClick={onDelete}
+              icon={<Trash2 className="h-3.5 w-3.5" />}
+              disabled={!editable}
+            />
+          )}
+        </div>
+      </div>
+      <div className="flex min-h-0 flex-1 bg-[var(--pc-surface)]">
+        <div className="flex h-full min-h-0 w-full flex-col">
+          <input
+            value={note.title}
+            onChange={(event) => onTitleChange(event.target.value.slice(0, 80))}
+            disabled={!editable}
+            data-stage-ignore-drag="true"
+            className="border-b-2 border-[var(--pc-border)] bg-transparent px-3 py-2 font-mono text-[11px] font-bold uppercase tracking-[0.08em] text-[var(--pc-text)] outline-none placeholder:text-[var(--pc-text-subtle)] disabled:cursor-default"
+            placeholder="Title"
+          />
+          <div className="flex items-center gap-2 border-b-2 border-[var(--pc-border)] px-3 py-2">
+            <button
+              type="button"
+              data-stage-ignore-drag="true"
+              disabled={!editable}
+              onClick={(event) => {
+                event.stopPropagation();
+                onBodySizeCycle();
+              }}
+              className="border border-[var(--pc-border)] px-2 py-1 font-mono text-[10px] uppercase tracking-[0.12em] disabled:opacity-40"
+            >
+              {note.body_size}
+            </button>
+            <div className="font-mono text-[9px] uppercase tracking-[0.12em] text-[var(--pc-text-muted)]">
+              body style
+            </div>
+          </div>
+          <div
+            ref={bodyEditorRef}
+            contentEditable={editable}
+            suppressContentEditableWarning
+            data-stage-ignore-drag="true"
+            onInput={() => syncEditorBody()}
+            onBlur={() => syncEditorBody()}
+            onKeyUp={() => updateFormatState()}
+            onMouseUp={() => updateFormatState()}
+            className={`h-full min-h-0 w-full overflow-y-auto bg-transparent px-3 py-3 leading-[1.55] text-[var(--pc-text)] outline-none empty:before:pointer-events-none empty:before:text-[var(--pc-text-subtle)] empty:before:content-['Type_note...'] ${getNoteBodySizeClass(
+              note.body_size
+            )} ${editable ? "" : "cursor-default"}`}
+          />
+        </div>
+      </div>
+    </div>
+  );
+};
+
+const StageImageTile: React.FC<{
+  image: StageImageDraft;
+  editable?: boolean;
+  syncState?: StageNoteSyncState;
+  onCaptionChange: (nextCaption: string) => void;
+  onBgModeCycle: () => void;
+  onDuplicate?: () => void;
+  onLockToggle?: () => void;
+  onPinToggle?: () => void;
+  onDelete?: () => void;
+}> = ({
+  image,
+  editable = true,
+  syncState = "idle",
+  onCaptionChange,
+  onBgModeCycle,
+  onDuplicate,
+  onLockToggle,
+  onPinToggle,
+  onDelete,
+}) => {
+  const syncLabel =
+    syncState === "saving"
+      ? "Saving"
+      : syncState === "saved"
+        ? "Saved"
+        : syncState === "error"
+          ? "Error"
+          : image.username || "Room image";
+
+  return (
+    <div className="group relative flex h-full flex-col overflow-hidden border-[3px] border-[var(--pc-border)] bg-[var(--pc-panel)] p-[3px]">
+      <div className="flex items-center justify-between border-b-2 border-[var(--pc-border)] bg-[var(--pc-surface-2)] px-[10px] py-2">
+        <div className="min-w-0">
+          <div className="flex items-center gap-2">
+            <ImagePlus className="h-3.5 w-3.5" />
+            <div className="font-mono text-[10px] font-bold uppercase tracking-[0.16em] text-[var(--pc-text)]">
+              Image
+            </div>
+          </div>
+          <div className="mt-1 truncate font-mono text-[9px] uppercase tracking-[0.12em] text-[var(--pc-text-muted)]">
+            {syncLabel}
+          </div>
+        </div>
+        <div className="flex items-center gap-1.5">
+          <TileActionButton
+            label={`Background: ${getStageImageBgLabel(image.bg_mode)}`}
+            onClick={onBgModeCycle}
+            icon={<span className="font-mono text-[9px]">{getStageImageBgLabel(image.bg_mode).slice(0, 1)}</span>}
+            disabled={!editable}
+          />
+          {onDuplicate && (
+            <TileActionButton
+              label="Duplicate image"
+              onClick={onDuplicate}
+              icon={<Copy className="h-3.5 w-3.5" />}
+              disabled={!editable}
+            />
+          )}
+          {onLockToggle && (
+            <TileActionButton
+              label={image.is_locked ? "Unlock image" : "Lock image"}
+              onClick={onLockToggle}
+              icon={image.is_locked ? <Unlock className="h-3.5 w-3.5" /> : <Lock className="h-3.5 w-3.5" />}
+              isActive={image.is_locked}
+              disabled={!editable}
+            />
+          )}
+          {onPinToggle && (
+            <TileActionButton
+              label={image.is_pinned ? "Unpin image" : "Pin image"}
+              onClick={onPinToggle}
+              icon={<Pin className="h-3.5 w-3.5" />}
+              isActive={image.is_pinned}
+              disabled={!editable}
+            />
+          )}
+          {onDelete && (
+            <TileActionButton
+              label="Delete image"
+              onClick={onDelete}
+              icon={<Trash2 className="h-3.5 w-3.5" />}
+              disabled={!editable}
+            />
+          )}
+        </div>
+      </div>
+      <div className="flex min-h-0 flex-1 flex-col bg-[var(--pc-surface)]">
+        <div className="truncate border-b-2 border-[var(--pc-border)] px-3 py-2 font-mono text-[10px] font-bold uppercase tracking-[0.08em] text-[var(--pc-text)]">
+          {image.file_name || "IMAGE"}
+        </div>
+        <div className={`min-h-0 flex-1 ${getStageImageBgClass(image.bg_mode)}`}>
+          <img
+            src={image.src}
+            alt={image.file_name || ""}
+            draggable={false}
+            data-stage-ignore-drag="true"
+            className="h-full w-full object-contain select-none"
+          />
+        </div>
+        <input
+          value={image.caption}
+          onChange={(event) => onCaptionChange(event.target.value.slice(0, 180))}
+          disabled={!editable}
+          data-stage-ignore-drag="true"
+          className="border-t-2 border-[var(--pc-border)] bg-transparent px-3 py-2 text-xs text-[var(--pc-text)] outline-none placeholder:text-[var(--pc-text-subtle)] disabled:cursor-default"
+          placeholder="Caption"
+        />
+      </div>
+    </div>
+  );
+};
+
 const StageTileShell: React.FC<{
   layout: StageTileLayout;
   stageSize: { width: number; height: number };
   aspectRatio: number;
   minWidth: number;
+  minHeight?: number;
   zoom?: number;
   snapToGridEnabled?: boolean;
+  preserveAspectRatio?: boolean;
   editable?: boolean;
   isPinned?: boolean;
   isSelected?: boolean;
@@ -885,8 +1419,10 @@ const StageTileShell: React.FC<{
   stageSize,
   aspectRatio,
   minWidth,
+  minHeight = 120,
   zoom = 1,
   snapToGridEnabled = true,
+  preserveAspectRatio = true,
   editable = true,
   isPinned = false,
   isSelected = false,
@@ -928,18 +1464,21 @@ const StageTileShell: React.FC<{
             )
           : (() => {
               const deltaX = (event.clientX - dragState.startX) / zoom;
+              const deltaY = (event.clientY - dragState.startY) / zoom;
               const nextWidth = clamp(
                 dragState.startWidth + deltaX,
                 minWidth,
                 stageSize.width - layout.x
               );
-              const nextHeight = Math.round(nextWidth / aspectRatio);
+              const nextHeight = preserveAspectRatio
+                ? Math.round(nextWidth / aspectRatio)
+                : clamp(dragState.startHeight + deltaY, minHeight, stageSize.height - layout.y);
 
               return snapStageLayout(
                 {
                   ...layout,
                   w: nextWidth,
-                  h: clamp(nextHeight, 120, stageSize.height - layout.y),
+                  h: clamp(nextHeight, minHeight, stageSize.height - layout.y),
                 },
                 stageSize,
                 { enabled: snapToGridEnabled, snapWidth: true, snapHeight: true }
@@ -964,7 +1503,7 @@ const StageTileShell: React.FC<{
       window.removeEventListener("pointermove", handlePointerMove);
       window.removeEventListener("pointerup", handlePointerUp);
     };
-  }, [aspectRatio, layout, minWidth, onLayoutChange, snapToGridEnabled, stageSize, zoom]);
+  }, [aspectRatio, layout, minHeight, minWidth, onLayoutChange, preserveAspectRatio, snapToGridEnabled, stageSize, zoom]);
 
   return (
     <div
@@ -980,7 +1519,7 @@ const StageTileShell: React.FC<{
         }
 
         const target = event.target as HTMLElement | null;
-        if (target?.closest("button")) {
+        if (target?.closest("button,[data-stage-ignore-drag='true'],textarea,input,[contenteditable='true']")) {
           return;
         }
 
@@ -1090,10 +1629,16 @@ export default function RoomPage(): JSX.Element {
   const [layoutPreference, setLayoutPreference] = useState<StageLayoutPreference>(() =>
     getStageLayoutPreference()
   );
+  const [showAddStageMenu, setShowAddStageMenu] = useState(false);
+  const [showRoomSettingsMenu, setShowRoomSettingsMenu] = useState(false);
   const [personalStageLayouts, setPersonalStageLayouts] = useState<StageLayoutMap>({});
   const [personalPinnedTileIds, setPersonalPinnedTileIds] = useState<string[]>([]);
   const [sharedStageLayouts, setSharedStageLayouts] = useState<StageLayoutMap>({});
   const [sharedPinnedTileIds, setSharedPinnedTileIds] = useState<string[]>([]);
+  const [stageNotes, setStageNotes] = useState<StageNoteDraft[]>([]);
+  const [stageNoteSyncStates, setStageNoteSyncStates] = useState<Record<number, StageNoteSyncState>>({});
+  const [stageImages, setStageImages] = useState<StageImageDraft[]>([]);
+  const [stageImageSyncStates, setStageImageSyncStates] = useState<Record<number, StageNoteSyncState>>({});
   const [showStageGrid, setShowStageGrid] = useState(true);
   const [stageSize, setStageSize] = useState(defaultStageSize);
   const [stageViewportSize, setStageViewportSize] = useState(defaultStageViewportSize);
@@ -1101,6 +1646,9 @@ export default function RoomPage(): JSX.Element {
   const [stageZoom, setStageZoom] = useState(1);
   const [sharedSyncNonce, setSharedSyncNonce] = useState(0);
   const autoRejoinAttemptRef = useRef<string | null>(null);
+  const stageImageInputRef = useRef<HTMLInputElement>(null);
+  const addStageMenuRef = useRef<HTMLDivElement>(null);
+  const roomSettingsMenuRef = useRef<HTMLDivElement>(null);
   const stageCanvasRef = useRef<HTMLDivElement>(null);
   const stagePanRef = useRef<{
     pointerId: number;
@@ -1114,6 +1662,10 @@ export default function RoomPage(): JSX.Element {
   const sharedStageLayoutsRef = useRef<StageLayoutMap>({});
   const sharedPinnedTileIdsRef = useRef<string[]>([]);
   const lastSharedEditAtRef = useRef(0);
+  const noteSyncTimeoutsRef = useRef<Record<number, number>>({});
+  const lastStageNoteEditAtRef = useRef(0);
+  const imageSyncTimeoutsRef = useRef<Record<number, number>>({});
+  const lastStageImageEditAtRef = useRef(0);
 
   const getRoomDisplayName = useCallback(
     (rawName: string, membersList: RoomStateResponse["members"]) => {
@@ -1250,6 +1802,128 @@ export default function RoomPage(): JSX.Element {
     setSharedStageLayouts(roomState.stage_layout.stage_layouts ?? {});
     setSharedPinnedTileIds(roomState.stage_layout.pinned_tile_ids ?? []);
   }, [roomState?.stage_layout]);
+
+  useEffect(() => {
+    if (!roomState?.stage_notes) {
+      return;
+    }
+
+    if (Date.now() - lastStageNoteEditAtRef.current < 1500) {
+      return;
+    }
+
+    setStageNotes(
+      roomState.stage_notes.map((note) => ({
+        id: note.id,
+        user_id: note.user_id,
+        username: note.username,
+        x: note.x,
+        y: note.y,
+        w: note.w,
+        h: note.h,
+        z: note.z,
+        title: note.title,
+        body: note.body,
+        body_bold: note.body_bold,
+        body_strike: note.body_strike,
+        body_size: note.body_size,
+        color: note.color,
+        is_pinned: note.is_pinned,
+        is_locked: note.is_locked,
+      }))
+    );
+    setStageNoteSyncStates((current) => {
+      const next: Record<number, StageNoteSyncState> = {};
+      roomState.stage_notes.forEach((note) => {
+        next[note.id] = current[note.id] === "error" ? "error" : "idle";
+      });
+      return next;
+    });
+  }, [roomState?.stage_notes]);
+
+  useEffect(() => {
+    return () => {
+      Object.values(noteSyncTimeoutsRef.current).forEach((timeoutId) => window.clearTimeout(timeoutId));
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!roomState?.stage_images) {
+      return;
+    }
+
+    if (Date.now() - lastStageImageEditAtRef.current < 1500) {
+      return;
+    }
+
+    setStageImages(
+      roomState.stage_images.map((image) => ({
+        id: image.id,
+        user_id: image.user_id,
+        username: image.username,
+        x: image.x,
+        y: image.y,
+        w: image.w,
+        h: image.h,
+        z: image.z,
+        src: image.src,
+        file_name: image.file_name,
+        caption: image.caption,
+        bg_mode: image.bg_mode,
+        is_pinned: image.is_pinned,
+        is_locked: image.is_locked,
+      }))
+    );
+    setStageImageSyncStates((current) => {
+      const next: Record<number, StageNoteSyncState> = {};
+      roomState.stage_images.forEach((image) => {
+        next[image.id] = current[image.id] === "error" ? "error" : "idle";
+      });
+      return next;
+    });
+  }, [roomState?.stage_images]);
+
+  useEffect(() => {
+    return () => {
+      Object.values(imageSyncTimeoutsRef.current).forEach((timeoutId) => window.clearTimeout(timeoutId));
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!showAddStageMenu) {
+      return;
+    }
+
+    const handlePointerDown = (event: PointerEvent) => {
+      const target = event.target as Node | null;
+      if (addStageMenuRef.current?.contains(target)) {
+        return;
+      }
+
+      setShowAddStageMenu(false);
+    };
+
+    document.addEventListener("pointerdown", handlePointerDown);
+    return () => document.removeEventListener("pointerdown", handlePointerDown);
+  }, [showAddStageMenu]);
+
+  useEffect(() => {
+    if (!showRoomSettingsMenu) {
+      return;
+    }
+
+    const handlePointerDown = (event: PointerEvent) => {
+      const target = event.target as Node | null;
+      if (roomSettingsMenuRef.current?.contains(target)) {
+        return;
+      }
+
+      setShowRoomSettingsMenu(false);
+    };
+
+    document.addEventListener("pointerdown", handlePointerDown);
+    return () => document.removeEventListener("pointerdown", handlePointerDown);
+  }, [showRoomSettingsMenu]);
 
   useEffect(() => {
     const updateStageSize = () => {
@@ -1529,6 +2203,132 @@ export default function RoomPage(): JSX.Element {
   const isCreator = members.some(
     (member) => member.user_id === user?.user_id && member.role === "creator"
   );
+  const orderedStageNotes = useMemo(
+    () =>
+      [...stageNotes].sort((left, right) => {
+        const pinDelta = Number(right.is_pinned) - Number(left.is_pinned);
+        if (pinDelta !== 0) {
+          return pinDelta;
+        }
+
+        return left.z - right.z || left.id - right.id;
+      }),
+    [stageNotes]
+  );
+  const orderedStageImages = useMemo(
+    () =>
+      [...stageImages].sort((left, right) => {
+        const pinDelta = Number(right.is_pinned) - Number(left.is_pinned);
+        if (pinDelta !== 0) {
+          return pinDelta;
+        }
+
+        return left.z - right.z || left.id - right.id;
+      }),
+    [stageImages]
+  );
+
+  const scheduleStageNoteSync = useCallback(
+    (noteId: number, payload: Parameters<typeof updateRoomStageNote>[2]) => {
+      if (!token || !roomIdentifier) {
+        return;
+      }
+
+      const existingTimeout = noteSyncTimeoutsRef.current[noteId];
+      if (existingTimeout) {
+        window.clearTimeout(existingTimeout);
+      }
+
+      setStageNoteSyncStates((current) => ({ ...current, [noteId]: "saving" }));
+      noteSyncTimeoutsRef.current[noteId] = window.setTimeout(() => {
+        void updateRoomStageNote(roomIdentifier, noteId, payload, token)
+          .then(() => {
+            setStageNoteSyncStates((current) => ({ ...current, [noteId]: "saved" }));
+            window.setTimeout(() => {
+              setStageNoteSyncStates((current) =>
+                current[noteId] === "saved" ? { ...current, [noteId]: "idle" } : current
+              );
+            }, 1200);
+          })
+          .catch((err) => {
+            setStageNoteSyncStates((current) => ({ ...current, [noteId]: "error" }));
+            setError(err instanceof Error ? err.message : "Failed to sync room stage note");
+          })
+          .finally(() => {
+            delete noteSyncTimeoutsRef.current[noteId];
+          });
+      }, 350);
+    },
+    [roomIdentifier, token]
+  );
+
+  const updateLocalStageNote = useCallback(
+    (
+      noteId: number,
+      updater: (current: StageNoteDraft) => StageNoteDraft,
+      syncPayload?: Parameters<typeof updateRoomStageNote>[2]
+    ) => {
+      lastStageNoteEditAtRef.current = Date.now();
+      setStageNotes((current) =>
+        current.map((note) => (note.id === noteId ? updater(note) : note))
+      );
+      if (syncPayload) {
+        scheduleStageNoteSync(noteId, syncPayload);
+      }
+    },
+    [scheduleStageNoteSync]
+  );
+
+  const scheduleStageImageSync = useCallback(
+    (imageId: number, payload: Parameters<typeof updateRoomStageImage>[2]) => {
+      if (!token || !roomIdentifier) {
+        return;
+      }
+
+      const existingTimeout = imageSyncTimeoutsRef.current[imageId];
+      if (existingTimeout) {
+        window.clearTimeout(existingTimeout);
+      }
+
+      setStageImageSyncStates((current) => ({ ...current, [imageId]: "saving" }));
+      imageSyncTimeoutsRef.current[imageId] = window.setTimeout(() => {
+        void updateRoomStageImage(roomIdentifier, imageId, payload, token)
+          .then(() => {
+            setStageImageSyncStates((current) => ({ ...current, [imageId]: "saved" }));
+            window.setTimeout(() => {
+              setStageImageSyncStates((current) =>
+                current[imageId] === "saved" ? { ...current, [imageId]: "idle" } : current
+              );
+            }, 1200);
+          })
+          .catch((err) => {
+            setStageImageSyncStates((current) => ({ ...current, [imageId]: "error" }));
+            setError(err instanceof Error ? err.message : "Failed to sync room stage image");
+          })
+          .finally(() => {
+            delete imageSyncTimeoutsRef.current[imageId];
+          });
+      }, 350);
+    },
+    [roomIdentifier, token]
+  );
+
+  const updateLocalStageImage = useCallback(
+    (
+      imageId: number,
+      updater: (current: StageImageDraft) => StageImageDraft,
+      syncPayload?: Parameters<typeof updateRoomStageImage>[2]
+    ) => {
+      lastStageImageEditAtRef.current = Date.now();
+      setStageImages((current) =>
+        current.map((image) => (image.id === imageId ? updater(image) : image))
+      );
+      if (syncPayload) {
+        scheduleStageImageSync(imageId, syncPayload);
+      }
+    },
+    [scheduleStageImageSync]
+  );
 
   const handleResetStageLayout = () => {
     setSelectedStageTileId(null);
@@ -1546,24 +2346,43 @@ export default function RoomPage(): JSX.Element {
     setStageViewOffset(getCenteredStageViewOffset(stageSize, stageViewportSize, stageZoom));
   };
 
-  const handleAdjustStageZoom = (direction: "in" | "out") => {
-    setStageZoom((current) => {
-      const nextZoom = clamp(
-        Number((current + (direction === "in" ? 0.1 : -0.1)).toFixed(2)),
-        minStageZoom,
-        maxStageZoom
+  const handleSetStageZoom = useCallback(
+    (nextZoomValue: number, anchor?: { x: number; y: number }) => {
+      const nextZoom = clamp(Number(nextZoomValue.toFixed(2)), minStageZoom, maxStageZoom);
+      if (nextZoom === stageZoom) {
+        return;
+      }
+
+      const nextOffset = clampStageViewOffset(
+        anchor
+          ? getZoomAnchoredStageViewOffset(anchor, stageViewOffset, stageZoom, nextZoom)
+          : stageViewOffset,
+        stageSize,
+        stageViewportSize,
+        nextZoom
       );
 
-      setStageViewOffset((offset) =>
-        clampStageViewOffset(offset, stageSize, stageViewportSize, nextZoom)
-      );
+      setStageZoom(nextZoom);
+      setStageViewOffset(nextOffset);
+    },
+    [stageSize, stageViewportSize, stageViewOffset, stageZoom]
+  );
 
-      return nextZoom;
-    });
+  const handleAdjustStageZoom = (direction: "in" | "out", anchor?: { x: number; y: number }) => {
+    handleSetStageZoom(stageZoom + (direction === "in" ? 0.1 : -0.1), anchor);
+  };
+
+  const handleResetStageZoom = () => {
+    handleSetStageZoom(1);
   };
 
   const handleTogglePinnedTile = (tileId: string) => {
-    const nextZ = Math.max(1, ...Object.values(activeStageLayouts).map((layout) => layout.z + 1));
+    const nextZ = Math.max(
+      1,
+      ...Object.values(activeStageLayouts).map((layout) => layout.z + 1),
+      ...stageNotes.map((note) => note.z + 1),
+      ...stageImages.map((image) => image.z + 1)
+    );
 
     setActivePinnedTileIds((current) =>
       current.includes(tileId) ? current.filter((id) => id !== tileId) : [...current, tileId]
@@ -1577,6 +2396,340 @@ export default function RoomPage(): JSX.Element {
           }
         : current[tileId],
     }));
+  };
+
+  const handleCreateStageNote = async () => {
+    if (!token || !roomIdentifier || !canEditSharedStageLayout) {
+      return;
+    }
+    setShowAddStageMenu(false);
+
+    const viewCenterX = (stageViewportSize.width / 2 - stageViewOffset.x) / stageZoom;
+    const viewCenterY = (stageViewportSize.height / 2 - stageViewOffset.y) / stageZoom;
+    const w = 300;
+    const h = 220;
+    const nextZ = Math.max(
+      1,
+      ...Object.values(activeStageLayouts).map((layout) => layout.z + 1),
+      ...stageNotes.map((note) => note.z + 1),
+      ...stageImages.map((image) => image.z + 1)
+    );
+
+    try {
+      const note = await createRoomStageNote(
+        roomIdentifier,
+        {
+          x: clamp(viewCenterX - w / 2, 0, stageSize.width - w),
+          y: clamp(viewCenterY - h / 2, 0, stageSize.height - h),
+          w,
+          h,
+          z: nextZ,
+          title: "",
+          body: "",
+          body_bold: false,
+          body_strike: false,
+          body_size: "md",
+          color: "amber",
+        },
+        token
+      );
+
+      lastStageNoteEditAtRef.current = Date.now();
+      setStageNotes((current) => [
+        ...current,
+        {
+          id: note.id,
+          user_id: note.user_id,
+          username: note.username,
+          x: note.x,
+          y: note.y,
+          w: note.w,
+          h: note.h,
+          z: note.z,
+          title: note.title,
+          body: note.body,
+          body_bold: note.body_bold,
+          body_strike: note.body_strike,
+          body_size: note.body_size,
+          color: note.color,
+          is_pinned: note.is_pinned,
+          is_locked: note.is_locked,
+        },
+      ]);
+      setStageNoteSyncStates((current) => ({ ...current, [note.id]: "idle" }));
+      setSelectedStageTileId(`note:${note.id}`);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to create room stage note");
+    }
+  };
+
+  const handleDeleteStageNote = async (noteId: number) => {
+    if (!token || !roomIdentifier || !canEditSharedStageLayout) {
+      return;
+    }
+
+    try {
+      await deleteRoomStageNote(roomIdentifier, noteId, token);
+      lastStageNoteEditAtRef.current = Date.now();
+      setStageNotes((current) => current.filter((note) => note.id !== noteId));
+      setStageNoteSyncStates((current) => {
+        const next = { ...current };
+        delete next[noteId];
+        return next;
+      });
+      const existingTimeout = noteSyncTimeoutsRef.current[noteId];
+      if (existingTimeout) {
+        window.clearTimeout(existingTimeout);
+        delete noteSyncTimeoutsRef.current[noteId];
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to delete room stage note");
+    }
+  };
+
+  const handleCreateStageImage = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (!file || !token || !roomIdentifier || !canEditSharedStageLayout) {
+      return;
+    }
+    setShowAddStageMenu(false);
+
+    try {
+      const src = await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => {
+          if (typeof reader.result === "string") {
+            resolve(reader.result);
+            return;
+          }
+          reject(new Error("Failed to read image file"));
+        };
+        reader.onerror = () => reject(new Error("Failed to read image file"));
+        reader.readAsDataURL(file);
+      });
+
+      const dimensions = await new Promise<{ width: number; height: number }>((resolve, reject) => {
+        const img = new Image();
+        img.onload = () => resolve({ width: img.naturalWidth, height: img.naturalHeight });
+        img.onerror = () => reject(new Error("Failed to load image preview"));
+        img.src = src;
+      });
+
+      const maxWidth = 560;
+      const minWidth = 260;
+      const width = clamp(
+        dimensions.width > 0 ? Math.round(Math.min(maxWidth, Math.max(minWidth, dimensions.width))) : 360,
+        minWidth,
+        maxWidth
+      );
+      const height = clamp(
+        Math.round(width * (dimensions.height / Math.max(dimensions.width, 1))),
+        180,
+        520
+      );
+      const viewCenterX = (stageViewportSize.width / 2 - stageViewOffset.x) / stageZoom;
+      const viewCenterY = (stageViewportSize.height / 2 - stageViewOffset.y) / stageZoom;
+      const nextZ = Math.max(
+        1,
+        ...Object.values(activeStageLayouts).map((layout) => layout.z + 1),
+        ...stageNotes.map((note) => note.z + 1),
+        ...stageImages.map((image) => image.z + 1)
+      );
+
+      const image = await createRoomStageImage(
+        roomIdentifier,
+        {
+          x: clamp(viewCenterX - width / 2, 0, stageSize.width - width),
+          y: clamp(viewCenterY - height / 2, 0, stageSize.height - height),
+          w: width,
+          h: height,
+          z: nextZ,
+          src,
+          file_name: file.name,
+          caption: "",
+          bg_mode: "grid",
+          is_locked: false,
+        },
+        token
+      );
+
+      lastStageImageEditAtRef.current = Date.now();
+      setStageImages((current) => [
+        ...current,
+        {
+          id: image.id,
+          user_id: image.user_id,
+          username: image.username,
+          x: image.x,
+          y: image.y,
+          w: image.w,
+          h: image.h,
+          z: image.z,
+          src: image.src,
+          file_name: image.file_name,
+          caption: image.caption,
+          bg_mode: image.bg_mode,
+          is_pinned: image.is_pinned,
+          is_locked: image.is_locked,
+        },
+      ]);
+      setStageImageSyncStates((current) => ({ ...current, [image.id]: "idle" }));
+      setSelectedStageTileId(`image:${image.id}`);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to create room stage image");
+    }
+  };
+
+  const handleDeleteStageImage = async (imageId: number) => {
+    if (!token || !roomIdentifier || !canEditSharedStageLayout) {
+      return;
+    }
+
+    try {
+      await deleteRoomStageImage(roomIdentifier, imageId, token);
+      lastStageImageEditAtRef.current = Date.now();
+      setStageImages((current) => current.filter((image) => image.id !== imageId));
+      setStageImageSyncStates((current) => {
+        const next = { ...current };
+        delete next[imageId];
+        return next;
+      });
+      const existingTimeout = imageSyncTimeoutsRef.current[imageId];
+      if (existingTimeout) {
+        window.clearTimeout(existingTimeout);
+        delete imageSyncTimeoutsRef.current[imageId];
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to delete room stage image");
+    }
+  };
+
+  const handleDuplicateStageNote = async (noteId: number) => {
+    if (!token || !roomIdentifier || !canEditSharedStageLayout) {
+      return;
+    }
+
+    const source = stageNotes.find((note) => note.id === noteId);
+    if (!source) {
+      return;
+    }
+
+    const nextZ = Math.max(
+      1,
+      ...Object.values(activeStageLayouts).map((layout) => layout.z + 1),
+      ...stageNotes.map((note) => note.z + 1),
+      ...stageImages.map((image) => image.z + 1)
+    );
+
+    try {
+      const note = await createRoomStageNote(
+        roomIdentifier,
+        {
+          x: clamp(source.x + 32, 0, stageSize.width - source.w),
+          y: clamp(source.y + 32, 0, stageSize.height - source.h),
+          w: source.w,
+          h: source.h,
+          z: nextZ,
+          title: source.title,
+          body: source.body,
+          body_bold: false,
+          body_strike: false,
+          body_size: source.body_size,
+          color: source.color,
+        },
+        token
+      );
+
+      lastStageNoteEditAtRef.current = Date.now();
+      setStageNotes((current) => [
+        ...current,
+        {
+          id: note.id,
+          user_id: note.user_id,
+          username: note.username,
+          x: note.x,
+          y: note.y,
+          w: note.w,
+          h: note.h,
+          z: note.z,
+          title: note.title,
+          body: note.body,
+          body_bold: note.body_bold,
+          body_strike: note.body_strike,
+          body_size: note.body_size,
+          color: note.color,
+          is_pinned: note.is_pinned,
+          is_locked: note.is_locked,
+        },
+      ]);
+      setStageNoteSyncStates((current) => ({ ...current, [note.id]: "idle" }));
+      setSelectedStageTileId(`note:${note.id}`);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to duplicate room stage note");
+    }
+  };
+
+  const handleDuplicateStageImage = async (imageId: number) => {
+    if (!token || !roomIdentifier || !canEditSharedStageLayout) {
+      return;
+    }
+
+    const source = stageImages.find((image) => image.id === imageId);
+    if (!source) {
+      return;
+    }
+
+    const nextZ = Math.max(
+      1,
+      ...Object.values(activeStageLayouts).map((layout) => layout.z + 1),
+      ...stageNotes.map((note) => note.z + 1),
+      ...stageImages.map((image) => image.z + 1)
+    );
+
+    try {
+      const image = await createRoomStageImage(
+        roomIdentifier,
+        {
+          x: clamp(source.x + 32, 0, stageSize.width - source.w),
+          y: clamp(source.y + 32, 0, stageSize.height - source.h),
+          w: source.w,
+          h: source.h,
+          z: nextZ,
+          src: source.src,
+          file_name: source.file_name,
+          caption: source.caption,
+          bg_mode: source.bg_mode,
+          is_locked: false,
+        },
+        token
+      );
+
+      lastStageImageEditAtRef.current = Date.now();
+      setStageImages((current) => [
+        ...current,
+        {
+          id: image.id,
+          user_id: image.user_id,
+          username: image.username,
+          x: image.x,
+          y: image.y,
+          w: image.w,
+          h: image.h,
+          z: image.z,
+          src: image.src,
+          file_name: image.file_name,
+          caption: image.caption,
+          bg_mode: image.bg_mode,
+          is_pinned: image.is_pinned,
+          is_locked: image.is_locked,
+        },
+      ]);
+      setStageImageSyncStates((current) => ({ ...current, [image.id]: "idle" }));
+      setSelectedStageTileId(`image:${image.id}`);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to duplicate room stage image");
+    }
   };
 
   const handleToggleSharedStageLock = async () => {
@@ -1609,12 +2762,75 @@ export default function RoomPage(): JSX.Element {
       return;
     }
 
-    if (orderedStageTiles.some((tile) => tile.id === selectedStageTileId)) {
+    if (
+      orderedStageTiles.some((tile) => tile.id === selectedStageTileId) ||
+      orderedStageNotes.some((note) => `note:${note.id}` === selectedStageTileId) ||
+      orderedStageImages.some((image) => `image:${image.id}` === selectedStageTileId)
+    ) {
       return;
     }
 
     setSelectedStageTileId(null);
-  }, [orderedStageTiles, selectedStageTileId]);
+  }, [orderedStageImages, orderedStageNotes, orderedStageTiles, selectedStageTileId]);
+
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      const target = event.target as HTMLElement | null;
+      const isTypingTarget = Boolean(
+        target?.closest("input,textarea,[contenteditable='true']")
+      );
+
+      if (event.key === "Escape") {
+        setShowAddStageMenu(false);
+        setShowRoomSettingsMenu(false);
+        setSelectedStageTileId(null);
+        return;
+      }
+
+      if (isTypingTarget || !isStageMode) {
+        return;
+      }
+
+      if ((event.key === "+" || event.key === "=") && !event.metaKey && !event.ctrlKey) {
+        event.preventDefault();
+        handleAdjustStageZoom("in");
+        return;
+      }
+
+      if (event.key === "-" && !event.metaKey && !event.ctrlKey) {
+        event.preventDefault();
+        handleAdjustStageZoom("out");
+        return;
+      }
+
+      if ((event.key === "Delete" || event.key === "Backspace") && selectedStageTileId) {
+        if (selectedStageTileId.startsWith("note:")) {
+          event.preventDefault();
+          void handleDeleteStageNote(Number(selectedStageTileId.split(":")[1]));
+          return;
+        }
+        if (selectedStageTileId.startsWith("image:")) {
+          event.preventDefault();
+          void handleDeleteStageImage(Number(selectedStageTileId.split(":")[1]));
+        }
+        return;
+      }
+
+      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "d" && selectedStageTileId) {
+        event.preventDefault();
+        if (selectedStageTileId.startsWith("note:")) {
+          void handleDuplicateStageNote(Number(selectedStageTileId.split(":")[1]));
+          return;
+        }
+        if (selectedStageTileId.startsWith("image:")) {
+          void handleDuplicateStageImage(Number(selectedStageTileId.split(":")[1]));
+        }
+      }
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [isStageMode, selectedStageTileId, handleAdjustStageZoom]);
 
   useEffect(() => {
     if (orderedStageTiles.length === 0) {
@@ -1909,30 +3125,41 @@ export default function RoomPage(): JSX.Element {
                 <div className="hidden h-10 items-center justify-center border-2 border-[var(--pc-border)] bg-[var(--pc-bg)] px-[14px] font-mono text-[11px] font-bold uppercase tracking-[0.14em] text-[var(--pc-text)] lg:flex">
                   {layoutPreference === "shared" ? "Shared Layout" : "Personal Layout"}
                 </div>
-                {layoutPreference === "shared" && isCreator && (
+                <div ref={addStageMenuRef} className="relative">
                   <button
                     type="button"
-                    onClick={() => void handleToggleSharedStageLock()}
-                    disabled={isSubmitting}
-                    className="flex h-10 items-center justify-center border-2 border-[var(--pc-border)] bg-[var(--pc-bg)] px-[14px] font-mono text-[11px] font-bold uppercase tracking-[0.14em] text-[var(--pc-text)] transition-colors hover:bg-[var(--pc-surface-strong)] disabled:opacity-40"
+                    onClick={() => setShowAddStageMenu((current) => !current)}
+                    disabled={!canEditSharedStageLayout}
+                    className="flex h-10 items-center justify-center gap-2 border-2 border-[var(--pc-border)] bg-[var(--pc-bg)] px-[14px] font-mono text-[11px] font-bold uppercase tracking-[0.14em] text-[var(--pc-text)] transition-colors hover:bg-[var(--pc-surface-strong)] disabled:cursor-not-allowed disabled:opacity-40"
                   >
-                    {isSharedStageLocked ? "Unlock Shared" : "Lock Shared"}
+                    <SquarePen className="h-3.5 w-3.5" />
+                    Add
+                    <ChevronDown className="h-3.5 w-3.5" />
                   </button>
-                )}
-                <button
-                  type="button"
-                  onClick={() => setShowStageGrid((current) => !current)}
-                  className="flex h-10 items-center justify-center border-2 border-[var(--pc-border)] bg-[var(--pc-bg)] px-[14px] font-mono text-[11px] font-bold uppercase tracking-[0.14em] text-[var(--pc-text)] transition-colors hover:bg-[var(--pc-surface-strong)]"
-                >
-                  Grid {showStageGrid ? "On" : "Off"}
-                </button>
-                <button
-                  type="button"
-                  onClick={handleCenterStageView}
-                  className="flex h-10 items-center justify-center border-2 border-[var(--pc-border)] bg-[var(--pc-bg)] px-[14px] font-mono text-[11px] font-bold uppercase tracking-[0.14em] text-[var(--pc-text)] transition-colors hover:bg-[var(--pc-surface-strong)]"
-                >
-                  Center View
-                </button>
+                  {showAddStageMenu && canEditSharedStageLayout && (
+                    <div className="absolute left-0 top-[calc(100%+8px)] z-30 flex min-w-[11rem] flex-col border-2 border-[var(--pc-border)] bg-[var(--pc-panel)] p-1">
+                      <button
+                        type="button"
+                        onClick={() => void handleCreateStageNote()}
+                        className="flex items-center gap-2 px-3 py-2 text-left font-mono text-[11px] font-bold uppercase tracking-[0.12em] text-[var(--pc-text)] transition-colors hover:bg-[var(--pc-surface-strong)]"
+                      >
+                        <SquarePen className="h-3.5 w-3.5" />
+                        Add Note
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setShowAddStageMenu(false);
+                          stageImageInputRef.current?.click();
+                        }}
+                        className="flex items-center gap-2 px-3 py-2 text-left font-mono text-[11px] font-bold uppercase tracking-[0.12em] text-[var(--pc-text)] transition-colors hover:bg-[var(--pc-surface-strong)]"
+                      >
+                        <ImagePlus className="h-3.5 w-3.5" />
+                        Add Image
+                      </button>
+                    </div>
+                  )}
+                </div>
                 <div className="flex h-10 items-center border-2 border-[var(--pc-border)]">
                   <button
                     type="button"
@@ -1952,18 +3179,89 @@ export default function RoomPage(): JSX.Element {
                     +
                   </button>
                 </div>
-                <button
-                  type="button"
-                  onClick={handleResetStageLayout}
-                  disabled={!canEditStageLayout}
-                  className="flex h-10 items-center justify-center border-2 border-[var(--pc-border)] bg-[var(--pc-bg)] px-[14px] font-mono text-[11px] font-bold uppercase tracking-[0.14em] text-[var(--pc-text)] transition-colors hover:bg-[var(--pc-surface-strong)] disabled:cursor-not-allowed disabled:opacity-40"
-                >
-                  Reset
-                </button>
               </>
             )}
             <div className="flex h-9 items-center justify-center border-2 border-[var(--pc-border)] bg-[var(--pc-action-bg)] px-[10px] font-mono text-xs font-bold uppercase tracking-[0.14em]">
               {formatOnlineCount(members.length)}
+            </div>
+            <div ref={roomSettingsMenuRef} className="relative">
+              <button
+                type="button"
+                onClick={() => setShowRoomSettingsMenu((current) => !current)}
+                className="flex h-10 w-10 items-center justify-center border-2 border-[var(--pc-border)] bg-[var(--pc-bg)] text-[var(--pc-text)] transition-colors hover:bg-[var(--pc-surface-strong)]"
+                title="Room settings"
+              >
+                <Settings className="h-4 w-4" />
+              </button>
+              {showRoomSettingsMenu && (
+                <div className="absolute right-0 top-[calc(100%+8px)] z-30 flex min-w-[14rem] flex-col border-2 border-[var(--pc-border)] bg-[var(--pc-panel)] p-1">
+                  <div className="border-b border-[var(--pc-border)] px-3 py-2 font-mono text-[10px] font-bold uppercase tracking-[0.14em] text-[var(--pc-text-muted)]">
+                    Room Settings
+                  </div>
+                  {isStageMode ? (
+                    <>
+                      <div className="px-3 py-2 font-mono text-[10px] font-bold uppercase tracking-[0.12em] text-[var(--pc-text-muted)]">
+                        {layoutPreference === "shared" ? "Shared Layout" : "Personal Layout"}
+                      </div>
+                      {layoutPreference === "shared" && isCreator && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            void handleToggleSharedStageLock();
+                            setShowRoomSettingsMenu(false);
+                          }}
+                          disabled={isSubmitting}
+                          className="px-3 py-2 text-left font-mono text-[11px] font-bold uppercase tracking-[0.12em] text-[var(--pc-text)] transition-colors hover:bg-[var(--pc-surface-strong)] disabled:opacity-40"
+                        >
+                          {isSharedStageLocked ? "Unlock Shared" : "Lock Shared"}
+                        </button>
+                      )}
+                      <button
+                        type="button"
+                        onClick={() => setShowStageGrid((current) => !current)}
+                        className="px-3 py-2 text-left font-mono text-[11px] font-bold uppercase tracking-[0.12em] text-[var(--pc-text)] transition-colors hover:bg-[var(--pc-surface-strong)]"
+                      >
+                        Grid {showStageGrid ? "On" : "Off"}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          handleResetStageZoom();
+                          setShowRoomSettingsMenu(false);
+                        }}
+                        className="px-3 py-2 text-left font-mono text-[11px] font-bold uppercase tracking-[0.12em] text-[var(--pc-text)] transition-colors hover:bg-[var(--pc-surface-strong)]"
+                      >
+                        Reset Zoom
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          handleCenterStageView();
+                          setShowRoomSettingsMenu(false);
+                        }}
+                        className="px-3 py-2 text-left font-mono text-[11px] font-bold uppercase tracking-[0.12em] text-[var(--pc-text)] transition-colors hover:bg-[var(--pc-surface-strong)]"
+                      >
+                        Center View
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          handleResetStageLayout();
+                          setShowRoomSettingsMenu(false);
+                        }}
+                        disabled={!canEditStageLayout}
+                        className="px-3 py-2 text-left font-mono text-[11px] font-bold uppercase tracking-[0.12em] text-[var(--pc-text)] transition-colors hover:bg-[var(--pc-surface-strong)] disabled:cursor-not-allowed disabled:opacity-40"
+                      >
+                        Reset Layout
+                      </button>
+                    </>
+                  ) : (
+                    <div className="px-3 py-2 text-left font-mono text-[11px] font-bold uppercase tracking-[0.12em] text-[var(--pc-text-muted)]">
+                      No stage controls in grid mode
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
             {inVoice ? (
               <button
@@ -2100,6 +3398,26 @@ export default function RoomPage(): JSX.Element {
           ) : layoutMode === "stage" ? (
             <div
               ref={stageCanvasRef}
+              onWheel={(event) => {
+                const target = event.target as HTMLElement | null;
+                if (target?.closest("[data-stage-tile='true']")) {
+                  return;
+                }
+
+                event.preventDefault();
+
+                const rect = stageCanvasRef.current?.getBoundingClientRect();
+                if (!rect) {
+                  return;
+                }
+
+                const anchor = {
+                  x: event.clientX - rect.left,
+                  y: event.clientY - rect.top,
+                };
+
+                handleAdjustStageZoom(event.deltaY < 0 ? "in" : "out", anchor);
+              }}
               onPointerDown={(event) => {
                 if (event.button !== 0) {
                   return;
@@ -2150,6 +3468,13 @@ export default function RoomPage(): JSX.Element {
                 stagePanRef.current ? "cursor-grabbing" : "cursor-grab"
               }`}
             >
+              <input
+                ref={stageImageInputRef}
+                type="file"
+                accept="image/*"
+                onChange={(event) => void handleCreateStageImage(event)}
+                className="hidden"
+              />
               <div className="pointer-events-none absolute inset-0 bg-[var(--pc-bg)] opacity-85" />
               {layoutPreference === "shared" && !canEditStageLayout && (
                 <div className="absolute left-3 top-3 z-20 border border-[var(--pc-border)] bg-[var(--pc-panel)] px-3 py-2 font-mono text-[10px] font-bold uppercase tracking-[0.16em] text-[var(--pc-text-muted)]">
@@ -2214,13 +3539,15 @@ export default function RoomPage(): JSX.Element {
                         isPinned={activePinnedTileIds.includes(tile.id)}
                         isSelected={selectedStageTileId === tile.id}
                         onSelect={() => setSelectedStageTileId(tile.id)}
-                        onBringToFront={() => {
-                          const nextZ = Math.max(
-                            1,
-                            ...Object.values(activeStageLayouts).map((layout) => layout.z + 1)
-                          );
-                          setActiveStageLayouts((current) => ({
-                            ...current,
+                      onBringToFront={() => {
+                        const nextZ = Math.max(
+                          1,
+                          ...Object.values(activeStageLayouts).map((layout) => layout.z + 1),
+                          ...stageNotes.map((entry) => entry.z + 1),
+                          ...stageImages.map((entry) => entry.z + 1)
+                        );
+                        setActiveStageLayouts((current) => ({
+                          ...current,
                             [tile.id]: {
                               ...current[tile.id],
                               z: nextZ,
@@ -2276,6 +3603,236 @@ export default function RoomPage(): JSX.Element {
                       </StageTileShell>
                     );
                   })}
+                  {orderedStageNotes.map((note) => (
+                    <StageTileShell
+                      key={`note:${note.id}`}
+                      layout={{
+                        x: note.x,
+                        y: note.y,
+                        w: note.w,
+                        h: note.h,
+                        z: note.z,
+                      }}
+                      stageSize={stageSize}
+                      aspectRatio={note.w / Math.max(note.h, 1)}
+                      minWidth={220}
+                      minHeight={160}
+                      zoom={stageZoom}
+                      snapToGridEnabled={showStageGrid}
+                      preserveAspectRatio={false}
+                      editable={canEditSharedStageLayout && !note.is_locked}
+                      isPinned={note.is_pinned}
+                      isSelected={selectedStageTileId === `note:${note.id}`}
+                      onSelect={() => setSelectedStageTileId(`note:${note.id}`)}
+                      onBringToFront={() => {
+                        const nextZ = Math.max(
+                          1,
+                          ...Object.values(activeStageLayouts).map((layout) => layout.z + 1),
+                          ...stageNotes.map((entry) => entry.z + 1),
+                          ...stageImages.map((entry) => entry.z + 1)
+                        );
+                        updateLocalStageNote(
+                          note.id,
+                          (current) => ({ ...current, z: nextZ }),
+                          { z: nextZ }
+                        );
+                      }}
+                      onLayoutChange={(nextLayout) => {
+                        updateLocalStageNote(
+                          note.id,
+                          (current) => ({
+                            ...current,
+                            x: nextLayout.x,
+                            y: nextLayout.y,
+                            w: nextLayout.w,
+                            h: nextLayout.h,
+                            z: nextLayout.z,
+                          }),
+                          {
+                            x: nextLayout.x,
+                            y: nextLayout.y,
+                            w: nextLayout.w,
+                            h: nextLayout.h,
+                            z: nextLayout.z,
+                          }
+                        );
+                      }}
+                    >
+                      <NoteTile
+                        note={note}
+                        editable={canEditSharedStageLayout}
+                        syncState={stageNoteSyncStates[note.id] ?? "idle"}
+                        onTitleChange={(nextTitle) => {
+                          updateLocalStageNote(
+                            note.id,
+                            (current) => ({ ...current, title: nextTitle }),
+                            { title: nextTitle }
+                          );
+                        }}
+                        onBodyChange={(nextBody) => {
+                          updateLocalStageNote(
+                            note.id,
+                            (current) => ({
+                              ...current,
+                              body: nextBody,
+                              body_bold: false,
+                              body_strike: false,
+                            }),
+                            {
+                              body: nextBody,
+                              body_bold: false,
+                              body_strike: false,
+                            }
+                          );
+                        }}
+                        onBodySizeCycle={() => {
+                          const order: StageNoteDraft["body_size"][] = ["sm", "md", "lg", "xl"];
+                          const nextSize = order[(order.indexOf(note.body_size) + 1) % order.length];
+                          updateLocalStageNote(
+                            note.id,
+                            (current) => ({ ...current, body_size: nextSize }),
+                            { body_size: nextSize }
+                          );
+                        }}
+                        onDuplicate={() => void handleDuplicateStageNote(note.id)}
+                        onLockToggle={() => {
+                          updateLocalStageNote(
+                            note.id,
+                            (current) => ({ ...current, is_locked: !current.is_locked }),
+                            { is_locked: !note.is_locked }
+                          );
+                        }}
+                        onPinToggle={() => {
+                          const nextZ = Math.max(
+                            1,
+                            ...Object.values(activeStageLayouts).map((layout) => layout.z + 1),
+                            ...stageNotes.map((entry) => entry.z + 1),
+                            ...stageImages.map((entry) => entry.z + 1)
+                          );
+                          updateLocalStageNote(
+                            note.id,
+                            (current) => ({
+                              ...current,
+                              is_pinned: !current.is_pinned,
+                              z: nextZ,
+                            }),
+                            {
+                              is_pinned: !note.is_pinned,
+                              z: nextZ,
+                            }
+                          );
+                        }}
+                        onDelete={() => void handleDeleteStageNote(note.id)}
+                      />
+                    </StageTileShell>
+                  ))}
+                  {orderedStageImages.map((image) => (
+                    <StageTileShell
+                      key={`image:${image.id}`}
+                      layout={{
+                        x: image.x,
+                        y: image.y,
+                        w: image.w,
+                        h: image.h,
+                        z: image.z,
+                      }}
+                      stageSize={stageSize}
+                      aspectRatio={image.w / Math.max(image.h, 1)}
+                      minWidth={220}
+                      minHeight={160}
+                      zoom={stageZoom}
+                      snapToGridEnabled={showStageGrid}
+                      preserveAspectRatio
+                      editable={canEditSharedStageLayout && !image.is_locked}
+                      isPinned={image.is_pinned}
+                      isSelected={selectedStageTileId === `image:${image.id}`}
+                      onSelect={() => setSelectedStageTileId(`image:${image.id}`)}
+                      onBringToFront={() => {
+                        const nextZ = Math.max(
+                          1,
+                          ...Object.values(activeStageLayouts).map((layout) => layout.z + 1),
+                          ...stageNotes.map((entry) => entry.z + 1),
+                          ...stageImages.map((entry) => entry.z + 1)
+                        );
+                        updateLocalStageImage(
+                          image.id,
+                          (current) => ({ ...current, z: nextZ }),
+                          { z: nextZ }
+                        );
+                      }}
+                      onLayoutChange={(nextLayout) => {
+                        updateLocalStageImage(
+                          image.id,
+                          (current) => ({
+                            ...current,
+                            x: nextLayout.x,
+                            y: nextLayout.y,
+                            w: nextLayout.w,
+                            h: nextLayout.h,
+                            z: nextLayout.z,
+                          }),
+                          {
+                            x: nextLayout.x,
+                            y: nextLayout.y,
+                            w: nextLayout.w,
+                            h: nextLayout.h,
+                            z: nextLayout.z,
+                          }
+                        );
+                      }}
+                    >
+                      <StageImageTile
+                        image={image}
+                        editable={canEditSharedStageLayout}
+                        syncState={stageImageSyncStates[image.id] ?? "idle"}
+                        onCaptionChange={(nextCaption) => {
+                          updateLocalStageImage(
+                            image.id,
+                            (current) => ({ ...current, caption: nextCaption }),
+                            { caption: nextCaption }
+                          );
+                        }}
+                        onBgModeCycle={() => {
+                          const order: StageImageDraft["bg_mode"][] = ["grid", "light", "dark", "transparent"];
+                          const nextMode = order[(order.indexOf(image.bg_mode) + 1) % order.length];
+                          updateLocalStageImage(
+                            image.id,
+                            (current) => ({ ...current, bg_mode: nextMode }),
+                            { bg_mode: nextMode }
+                          );
+                        }}
+                        onDuplicate={() => void handleDuplicateStageImage(image.id)}
+                        onLockToggle={() => {
+                          updateLocalStageImage(
+                            image.id,
+                            (current) => ({ ...current, is_locked: !current.is_locked }),
+                            { is_locked: !image.is_locked }
+                          );
+                        }}
+                        onPinToggle={() => {
+                          const nextZ = Math.max(
+                            1,
+                            ...Object.values(activeStageLayouts).map((layout) => layout.z + 1),
+                            ...stageNotes.map((entry) => entry.z + 1),
+                            ...stageImages.map((entry) => entry.z + 1)
+                          );
+                          updateLocalStageImage(
+                            image.id,
+                            (current) => ({
+                              ...current,
+                              is_pinned: !current.is_pinned,
+                              z: nextZ,
+                            }),
+                            {
+                              is_pinned: !image.is_pinned,
+                              z: nextZ,
+                            }
+                          );
+                        }}
+                        onDelete={() => void handleDeleteStageImage(image.id)}
+                      />
+                    </StageTileShell>
+                  ))}
                 </div>
               )}
             </div>
